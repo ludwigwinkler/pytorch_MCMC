@@ -1,5 +1,5 @@
 
-# pytorch-MC^2 (pytorch-MCMC)
+# torch-MC^2 (torch-MCMC)
 HMC on 3 layer NN | HMC on GMM
 :-------------------------------------------:|:------------------------------:
 ![](HMC_Sampler3.gif) | ![alt-text-2](GMM_HMC1.gif "GMM")
