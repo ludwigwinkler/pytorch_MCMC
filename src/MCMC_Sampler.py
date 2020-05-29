@@ -7,12 +7,12 @@ import matplotlib.pyplot as plt
 
 import numpy as np
 
-from MCMC.src.MCMC_Utils import posterior_dist
-from MCMC.src.MCMC_Optim import SGLD_Optim, MetropolisHastings_Optim
-from MCMC.src.MCMC_Acceptance import MetropolisHastingsAcceptance
-from MCMC.src.MCMC_Chain import Chain, SGLD_Chain, MALA_Chain, HMC_Chain
-from MCMC.src.MCMC_Acceptance import MetropolisHastingsAcceptance, SDE_Acceptance
-from MCMC.src.MCMC_ProbModel import ProbModel
+from pytorch_MCMC.src.MCMC_Utils import posterior_dist
+from pytorch_MCMC.src.MCMC_Optim import SGLD_Optim, MetropolisHastings_Optim
+from pytorch_MCMC.src.MCMC_Acceptance import MetropolisHastingsAcceptance
+from pytorch_MCMC.src.MCMC_Chain import Chain, SGLD_Chain, MALA_Chain, HMC_Chain
+from pytorch_MCMC.src.MCMC_Acceptance import MetropolisHastingsAcceptance, SDE_Acceptance
+from pytorch_MCMC.src.MCMC_ProbModel import ProbModel
 
 from joblib import Parallel, delayed
 import concurrent.futures

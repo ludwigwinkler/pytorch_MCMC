@@ -21,9 +21,9 @@ torch.set_printoptions(precision=4, sci_mode=False)
 np.set_printoptions(precision=4, suppress=True)
 
 sys.path.append("../../..")  # Up to -> KFAC -> Optimization -> PHD
-from MCMC.src.MCMC_ProbModel import ProbModel
-from MCMC.src.MCMC_Optim import SGLD_Optim, MetropolisHastings_Optim, MALA_Optim, HMC_Optim
-from MCMC.src.MCMC_Acceptance import SDE_Acceptance, MetropolisHastingsAcceptance
+from pytorch_MCMC.src.MCMC_ProbModel import ProbModel
+from pytorch_MCMC.src.MCMC_Optim import SGLD_Optim, MetropolisHastings_Optim, MALA_Optim, HMC_Optim
+from pytorch_MCMC.src.MCMC_Acceptance import SDE_Acceptance, MetropolisHastingsAcceptance
 from Utils.Utils import RunningAverageMeter
 
 '''

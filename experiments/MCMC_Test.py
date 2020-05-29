@@ -37,10 +37,10 @@ from torchvision import datasets, transforms
 from torch.nn.functional import leaky_relu
 from torch.utils.tensorboard import SummaryWriter
 
-from MCMC.src.MCMC_ProbModel import ProbModel
-from MCMC.src.MCMC_Models import GMM, LinReg, RegressionNN
-from MCMC.src.MCMC_Sampler import SGLD_Sampler, MetropolisHastings_Sampler, MALA_Sampler, HMC_Sampler
-from MCMC.data.MCMC_SyntheticData import generate_linear_regression_data, generate_multimodal_linear_regression, generate_nonstationary_data
+from pytorch_MCMC.src.MCMC_ProbModel import ProbModel
+from pytorch_MCMC.src.MCMC_Models import GMM, LinReg, RegressionNN
+from pytorch_MCMC.src.MCMC_Sampler import SGLD_Sampler, MetropolisHastings_Sampler, MALA_Sampler, HMC_Sampler
+from pytorch_MCMC.data.MCMC_SyntheticData import generate_linear_regression_data, generate_multimodal_linear_regression, generate_nonstationary_data
 from Utils.Utils import RunningAverageMeter, str2bool
 
 params = argparse.ArgumentParser(description='parser example')

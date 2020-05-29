@@ -2,7 +2,7 @@
 # torch-MC^2 (torch-MCMC)
 HMC on 3 layer NN | HMC on GMM
 :-------------------------------------------:|:------------------------------:
-![](HMC_Sampler3.gif) | ![alt-text-2](GMM_HMC1.gif "GMM")
+![](data/plots/HMC_Sampler3.gif) | ![alt-text-2](data/plots/GMM_HMC1.gif "GMM")
 
 This package implements a series of MCMC sampling algorithms in PyTorch in a modular way:
 

@@ -24,7 +24,7 @@ np.set_printoptions(precision=4, suppress=True)
 
 sys.path.append("../../..")  # Up to -> KFAC -> Optimization -> PHD
 
-from MCMC.src.MCMC_ProbModel import ProbModel
+from pytorch_MCMC.src.MCMC_ProbModel import ProbModel
 
 class GMM(ProbModel):
 
