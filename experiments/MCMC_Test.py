@@ -1,47 +1,24 @@
 # cleaner interaction
 
 
-import future, sys, os, datetime, argparse
+import os, argparse
 
 # print(os.path.dirname(sys.executable))
-import torch
-import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 
 matplotlib.rcParams["figure.figsize"] = [10, 10]
-
-from joblib import Parallel
 
 import torch
 
 SEED = 0
 # torch.manual_seed(SEED)
 # np.random.seed(SEED)
-import torch.nn.functional as F
-from torch.distributions import Normal, MultivariateNormal, Categorical
 
-from torch.optim import RMSprop, Adam, SGD
-from torch import tanh, sigmoid, relu, optim
-
-from torch.nn import Sequential, Conv2d, ReLU, Tanh, ConvTranspose2d, LayerNorm, Linear, BatchNorm1d, CELU, Softplus
-from torch.nn import ReLU, Tanh, CELU, Softplus, LeakyReLU, Sigmoid
-from torch.nn import Parameter
-
-from torch.optim import Adam
-from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau, MultiStepLR
-
-from torch.utils.data import DataLoader, TensorDataset
-from torchvision import datasets, transforms
-from torch.nn.functional import leaky_relu
-from torch.utils.tensorboard import SummaryWriter
-
-from pytorch_MCMC.src.MCMC_ProbModel import ProbModel
-from pytorch_MCMC.src.MCMC_Models import GMM, LinReg, RegressionNN
-from pytorch_MCMC.src.MCMC_Sampler import SGLD_Sampler, MetropolisHastings_Sampler, MALA_Sampler, HMC_Sampler
-from pytorch_MCMC.data.MCMC_SyntheticData import generate_linear_regression_data, generate_multimodal_linear_regression, generate_nonstationary_data
-from Utils.Utils import RunningAverageMeter, str2bool
+from pytorch_MCMC.models.MCMC_Models import GMM, LinReg, RegressionNN
+from pytorch_MCMC.src.MCMC_Sampler import SGLD_Sampler, MALA_Sampler, HMC_Sampler
+from pytorch_MCMC.data.MCMC_SyntheticData import generate_linear_regression_data, generate_nonstationary_data
+from Utils.Utils import str2bool
 
 params = argparse.ArgumentParser(description='parser example')
 params.add_argument('-logname', type=str, default='Tmp')
