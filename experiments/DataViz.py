@@ -30,11 +30,11 @@ import copy
 cwd = os.path.abspath(os.getcwd())
 os.chdir(cwd)
 
-from MCMC.src.MCMC_ProbModel import ProbModel
-from MCMC.src.MCMC_Models import GMM, LinReg, RegressionNN
-from MCMC.src.MCMC_Sampler import SGLD_Sampler, MetropolisHastings_Sampler, MALA_Sampler, HMC_Sampler
-from MCMC.data.MCMC_SyntheticData import generate_linear_regression_data, generate_multimodal_linear_regression, generate_nonstationary_data
-from MCMC.src.MCMC_Utils import posterior_dist
+from pytorch_MCMC.src.MCMC_ProbModel import ProbModel
+from pytorch_MCMC.models.MCMC_Models import GMM, LinReg, RegressionNN
+from pytorch_MCMC.src.MCMC_Sampler import SGLD_Sampler, MetropolisHastings_Sampler, MALA_Sampler, HMC_Sampler
+from pytorch_MCMC.data.MCMC_SyntheticData import generate_linear_regression_data, generate_multimodal_linear_regression, generate_nonstationary_data
+from pytorch_MCMC.src.MCMC_Utils import posterior_dist
 from Utils.Utils import RunningAverageMeter, str2bool
 
 def create_supervised_gif(model, chain, data):

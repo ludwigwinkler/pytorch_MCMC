@@ -15,7 +15,7 @@ This package implements a series of MCMC sampling algorithms in PyTorch in a mod
 The focus lies on four core ingredients to MCMC with corresponding routines:
 
 - `MCMC.src.MCMC_ProbModel` : Probabilistic wrapper around your model providing a uniform interface
-- `MCMC.src.MCMC_Chain` : Markov Chain for storing samples
+- `MCMC.src.MCMC_Chain` : Markov Chain for storing samples√
 - `MCMC.src.MCMC_Optim` : MCMC_Optim parent class for handling parameters
 - `MCMC.src.MCMC_Sampler`: Sampler that binds it all together
 

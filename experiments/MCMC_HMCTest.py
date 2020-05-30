@@ -24,11 +24,11 @@ params = argparse.ArgumentParser(description='parser example')
 params.add_argument('-logname', 	type=str, default='Tmp')
 
 params.add_argument('-num_samples', 	type=int, default=1000)
-params.add_argument('-model',	 	choices=['gmm', 'linreg', 'regnn'], default='gmm')
+params.add_argument('-model',	 	choices=['gmm', 'linreg', 'regnn'], default='regnn')
 params.add_argument('-sampler', 	choices=['sgld','mala', 'hmc'], default='hmc')
 
-params.add_argument('-step_size', 	type=float, default=0.1)
-params.add_argument('-num_steps', 	type=int, default=5000)
+params.add_argument('-step_size', 	type=float, default=0.0001)
+params.add_argument('-num_steps', 	type=int, default=1000)
 params.add_argument('-pretrain', 	type=str2bool, default=True)
 params.add_argument('-tune', 		type=str2bool, default=False)
 params.add_argument('-burn_in', 	type=int, default=200)
@@ -116,5 +116,5 @@ elif params.model == 'regnn':
 	sampler = HMC_Sampler(probmodel=nn, step_size=params.step_size, num_steps=params.num_steps, burn_in=params.burn_in, pretrain=params.pretrain, tune=params.tune)
 	# sampler = MetropolisHastings_Sampler(probmodel=nn, step_size=params.step_size, num_steps=params.num_steps, burn_in=params.burn_in, pretrain=params.pretrain, tune=params.tune)
 	sampler.sample_chains()
-	torch.save(sampler.chain, 'hmc_regnn_ss0.01_len10000.chain')
-	nn.predict(sampler.chain)
+
+	nn.predict(sampler.chain, plot=True)

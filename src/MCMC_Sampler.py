@@ -385,7 +385,7 @@ class HMC_Sampler(Sampler):
 
 		self.chain = Chain(probmodel=self.probmodel) # the aggregating chain
 
-		torch.save(chains, 'GMM_chains.chain')
+		# torch.save(chains, 'GMM_chains.chain')
 
 		for chain in chains:
 			self.chain += chain
