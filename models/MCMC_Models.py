@@ -335,14 +335,11 @@ class RegressionNNHetero(ProbModel):
 
 	def __init__(self, x, y, batch_size=1):
 
-
-
-
 		self.data = x
 		self.target = y
 
 		# dataloader = DataLoader(TensorDataset(self.data, self.target), shuffle=True, batch_size=self.data.shape[0], drop_last=False)
-		dataloader = DataLoader(TensorDataset(self.data, self.target), shuffle=True, batch_size=batch_size, drop_last=False)
+		dataloader = DataLoader(TensorDataset(x, y), shuffle=True, batch_size=batch_size, drop_last=False)
 
 		ProbModel.__init__(self, dataloader)
 
@@ -452,9 +449,9 @@ class RegressionNNHetero(ProbModel):
 
 			axs[0].scatter(self.data, self.target, alpha=1, s=1, color='blue')
 			axs[0].plot(data.squeeze(), mu, alpha=1., color='red')
-			axs[0].fill_between(data, mu+std, mu-std, color='red', alpha=0.25)
-			axs[0].fill_between(data, mu+2*std, mu-2*std, color='red', alpha=0.10)
-			axs[0].fill_between(data, mu+3*std, mu-3*std, color='red', alpha=0.05)
+			axs[0].fill_between(data, mu+total_std, mu-total_std, color='red', alpha=0.25)
+			axs[0].fill_between(data, mu+2*total_std, mu-2*total_std, color='red', alpha=0.10)
+			axs[0].fill_between(data, mu+3*total_std, mu-3*total_std, color='red', alpha=0.05)
 
 			[axs[1].plot(data, pred, alpha=0.1, color='red') for pred in pred_mu]
 			axs[1].scatter(self.data, self.target, alpha=1, s=1, color='blue')

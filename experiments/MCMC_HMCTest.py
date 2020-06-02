@@ -24,10 +24,10 @@ params = argparse.ArgumentParser(description='parser example')
 params.add_argument('-logname', 	type=str, default='Tmp')
 
 params.add_argument('-num_samples', 	type=int, default=500)
-params.add_argument('-model',	 	choices=['gmm', 'linreg', 'regnn'], default='gmm')
-params.add_argument('-sampler', 	choices=['sgld','mala', 'hmc'], default='hmc')
+params.add_argument('-model',	 	choices=['gmm', 'linreg', 'regnn'], default='regnn')
+params.add_argument('-sampler', 	choices=['sgld','mala', 'hmc'], default='sgld')
 
-params.add_argument('-step_size', 	type=float, default=0.6)
+params.add_argument('-step_size', 	type=float, default=0.00001)
 params.add_argument('-num_steps', 	type=int, default=3000)
 params.add_argument('-pretrain', 	type=str2bool, default=True)
 params.add_argument('-tune', 		type=str2bool, default=False)
@@ -36,7 +36,7 @@ params.add_argument('-burn_in', 	type=int, default=100)
 params.add_argument('-num_chains', 	type=int, default=os.cpu_count() - 1)
 params.add_argument('-batch_size', 	type=int, default=50)
 
-params.add_argument('-hmc_traj_length', type=int, default=10)
+params.add_argument('-hmc_traj_length', type=int, default=20)
 
 params.add_argument('-val_split', 	type=float, default=0.9)  # first part is train, second is val i.e. val_split=0.8 -> 80% train, 20% val
 
@@ -106,7 +106,7 @@ elif params.model == 'linreg':
 
 elif params.model == 'regnn':
 
-	model = ['homo', 'hetero'][0]
+	model = ['homo', 'hetero'][1]
 	if model=='homo':
 		x, y = generate_nonstationary_data(num_samples=params.num_samples, plot=False, y_constant_noise_std=0.25, y_nonstationary_noise_std=0.01)
 		nn = RegressionNNHomo(x, y, batch_size=params.batch_size)

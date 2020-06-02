@@ -4,6 +4,8 @@ HMC on 3 layer NN | HMC on GMM
 :-------------------------------------------:|:------------------------------:
 ![](data/plots/HMC_Sampler3.gif) | ![alt-text-2](data/plots/GMM_HMC1.gif "GMM")
 
+<img src="data/plots/EpistemicAleatoricUncertainty.png" width="500">
+
 This package implements a series of MCMC sampling algorithms in PyTorch in a modular way:
 
 - Metropolis Hastings

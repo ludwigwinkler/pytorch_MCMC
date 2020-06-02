@@ -309,7 +309,7 @@ class HMC_Optim(Optimizer, MCMC_Optim):
 				# print(p)
 				state = self.state[p]
 				# state['velocity'] = 0.1*torch.randn_like(p)
-				state['velocity'] = 1*torch.randn_like(p)
+				state['velocity'] = 1.*torch.randn_like(p)
 				# print(self.state)
 				# state['velocity'] = abs(torch.randn_like(p))
 				# state['velocity'] = abs(1.*torch.randn(1)*torch.ones_like(p))
