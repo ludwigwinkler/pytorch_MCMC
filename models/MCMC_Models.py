@@ -338,8 +338,8 @@ class RegressionNNHetero(ProbModel):
 		self.data = x
 		self.target = y
 
-		# dataloader = DataLoader(TensorDataset(self.data, self.target), shuffle=True, batch_size=self.data.shape[0], drop_last=False)
-		dataloader = DataLoader(TensorDataset(x, y), shuffle=True, batch_size=batch_size, drop_last=False)
+		dataloader = DataLoader(TensorDataset(self.data, self.target), shuffle=True, batch_size=self.data.shape[0], drop_last=False)
+		# dataloader = DataLoader(TensorDataset(x, y), shuffle=True, batch_size=batch_size, drop_last=False)
 
 		ProbModel.__init__(self, dataloader)
 

@@ -10,7 +10,7 @@ import numpy as np
 from pytorch_MCMC.src.MCMC_Utils import posterior_dist
 from pytorch_MCMC.src.MCMC_Optim import SGLD_Optim, MetropolisHastings_Optim
 from pytorch_MCMC.src.MCMC_Acceptance import MetropolisHastingsAcceptance
-from pytorch_MCMC.src.MCMC_Chain import Chain, SGLD_Chain, MALA_Chain, HMC_Chain
+from pytorch_MCMC.src.MCMC_Chain import Chain, SGLD_Chain, MALA_Chain, HMC_Chain, SGNHT_Chain
 from pytorch_MCMC.src.MCMC_Acceptance import MetropolisHastingsAcceptance, SDE_Acceptance
 from pytorch_MCMC.src.MCMC_ProbModel import ProbModel
 
@@ -370,6 +370,55 @@ class HMC_Sampler(Sampler):
 
 		elif self.num_chains == 1:
 			chain = HMC_Chain(copy.deepcopy(self.probmodel),
+					   step_size=self.step_size,
+					   num_steps=self.num_steps,
+					   burn_in=self.burn_in,
+					   pretrain=self.pretrain,
+					   tune=self.tune)
+			chains = [chain.sample_chain()]
+
+		self.chain = Chain(probmodel=self.probmodel) # the aggregating chain
+
+		for chain in chains:
+			self.chain += chain
+
+		return chains
+
+class SGNHT_Sampler(Sampler):
+
+	def __init__(self, probmodel, step_size=0.01, num_steps=10000, num_chains=7, burn_in=500, pretrain=True, tune=True,
+		     traj_length=21):
+		'''
+
+		:param probmodel: Probmodel() that implements forward, log_prob, prob and sample
+		:param step_length:
+		:param num_steps:
+		:param burn_in:
+		'''
+
+		assert isinstance(probmodel, ProbModel)
+		Sampler.__init__(self, probmodel, step_size, num_steps, num_chains, burn_in, pretrain, tune)
+
+		self.traj_length = traj_length
+
+	def __str__(self):
+		return 'SGNHT'
+
+	def sample_chains(self):
+
+		if self.num_chains > 1:
+			self.parallel_chains = [SGNHT_Chain(copy.deepcopy(self.probmodel),
+							   step_size=self.step_size,
+							   num_steps=self.num_steps,
+							   burn_in=self.burn_in,
+							   pretrain=self.pretrain,
+							   tune=self.tune)
+						for i in range(self.num_chains)]
+
+			chains = Parallel(n_jobs=self.num_chains)(delayed(chain.sample_chain)() for chain in self.parallel_chains)
+
+		elif self.num_chains == 1:
+			chain = SGNHT_Chain(copy.deepcopy(self.probmodel),
 					   step_size=self.step_size,
 					   num_steps=self.num_steps,
 					   burn_in=self.burn_in,

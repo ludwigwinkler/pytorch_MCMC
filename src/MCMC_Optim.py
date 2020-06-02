@@ -113,6 +113,33 @@ class MCMC_Optim:
 			group["step_size"] = np.exp(log_eps)
 
 
+class MetropolisHastings_Optim(Optimizer, MCMC_Optim):
+
+	def __init__(self, model, step_length):
+
+		if step_length < 0.0:
+			raise ValueError("Invalid learning rate: {}".format(step_length))
+
+		defaults = dict(lr=step_length)
+
+		params = model.parameters()
+		self.model = model
+
+		Optimizer.__init__(self, params=params, defaults=defaults)
+		MCMC_Optim.__init__(self)
+
+	def step(self):
+
+		log_prob = None
+
+		for group in self.param_groups:
+
+			for p in group['params']:
+				p.data.add_(other=torch.randn_like(p), alpha=group['lr'], )
+
+		return log_prob
+
+
 class SGLD_Optim(Optimizer, MCMC_Optim):
 
 	def __init__(self, model, step_size=0.1, prior_std=1., addnoise=True):
@@ -308,7 +335,6 @@ class HMC_Optim(Optimizer, MCMC_Optim):
 			for p in group['params']:
 				# print(p)
 				state = self.state[p]
-				# state['velocity'] = 0.1*torch.randn_like(p)
 				state['velocity'] = 1.*torch.randn_like(p)
 				# print(self.state)
 				# state['velocity'] = abs(torch.randn_like(p))
@@ -354,29 +380,90 @@ class HMC_Optim(Optimizer, MCMC_Optim):
 
 		return log_prob
 
-class MetropolisHastings_Optim(Optimizer, MCMC_Optim):
+class SGNHT_Optim(Optimizer, MCMC_Optim):
 
-	def __init__(self, model, step_length):
+	def __init__(self, model, step_size=0.1, prior_std=1.):
+		'''
+		log_N(θ|0,1) =
+		:param model:
+		:param step_size:
+		:param norm_sigma:
+		:param addnoise:
+		'''
 
-		if step_length < 0.0:
-			raise ValueError("Invalid learning rate: {}".format(step_length))
+		weight_decay = 1 / (prior_std ** 2) if prior_std != 0 else 0
+		if weight_decay < 0.0:
+			raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+		if step_size < 0.0:
+			raise ValueError("Invalid learning rate: {}".format(step_size))
 
-		defaults = dict(lr=step_length)
+		self.num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+		self.A = 1.
 
-		params = model.parameters()
+		defaults = dict(step_size=step_size,
+				weight_decay=weight_decay,
+				traj_step=0,
+				num_params=self.num_params,
+				A=self.A)
+
 		self.model = model
+		params = self.model.parameters()
 
 		Optimizer.__init__(self, params=params, defaults=defaults)
 		MCMC_Optim.__init__(self)
 
 	def step(self):
 
-		log_prob = None
+		for group in self.param_groups:
+
+			step_size = group['step_size']
+
+			# '''For velocity^T velocity / num_params over entire model'''
+			# group['velocity_squared'] = 0.
+			# for p in group['params']:
+			# 	'''
+			# 	compute 1/#params p^T p over entire model
+			# 	'''
+			#
+			# 	state = self.state[p]
+			# 	group['velocity_squared'] += torch.sum(state['velocity']**2)
+
+			for p in group['params']:
+
+				grad = p.grad.data
+				state = self.state[p] # contains 'velocity' and 'thermostat'
+
+				'''Update velocity'''
+				state['velocity'].add_(other=-step_size * grad - step_size*state['thermostat']*state['velocity'])
+				state['velocity'].add_(other=(2*group['A']*step_size)**0.5*torch.randn_like(p))
+
+				'''Update Thermostat'''
+				# state['thermostat'].add_(other=step_size*(group['velocity_squared']/group['num_params'] - 1))
+				state['thermostat'].add_(other=step_size*(state['velocity']**2 - 1))
+
+				'''Update parameter'''
+				p.data.add_(other=state['velocity'], alpha=group['step_size'])
+
+			group['traj_step'] += 1
+
+
+	def sample_momentum(self):
 
 		for group in self.param_groups:
 
+			group['traj_step'] = 0
+
 			for p in group['params']:
-				p.data.add_(other=torch.randn_like(p), alpha=group['lr'],)
+				state = self.state[p]
+				state['velocity'] = 1.*torch.randn_like(p)
 
-		return log_prob
+	def sample_thermostat(self):
 
+		for group in self.param_groups:
+
+			group['traj_step'] = 0
+
+			for p in group['params']:
+				state = self.state[p]
+				state['thermostat'] = group['A']*torch.ones_like(p)
+				# state['thermostat'] = group['A']*torch.ones_like(p).uniform_(0,1)

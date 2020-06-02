@@ -22,7 +22,7 @@ np.set_printoptions(precision=4, suppress=True)
 
 sys.path.append("../../..")  # Up to -> KFAC -> Optimization -> PHD
 from pytorch_MCMC.src.MCMC_ProbModel import ProbModel
-from pytorch_MCMC.src.MCMC_Optim import SGLD_Optim, MetropolisHastings_Optim, MALA_Optim, HMC_Optim
+from pytorch_MCMC.src.MCMC_Optim import SGLD_Optim, MetropolisHastings_Optim, MALA_Optim, HMC_Optim, SGNHT_Optim
 from pytorch_MCMC.src.MCMC_Acceptance import SDE_Acceptance, MetropolisHastingsAcceptance
 from Utils.Utils import RunningAverageMeter
 
@@ -457,3 +457,110 @@ class HMC_Chain(Sampler_Chain):
 			self.probmodel.load_state_dict(self.chain.state['state_dict'])
 
 		self.chain += (self.probmodel, proposal_log_prob, accept)
+
+class SGNHT_Chain(Sampler_Chain):
+
+	def __init__(self, probmodel, step_size=0.0001, num_steps=2000, burn_in=100, pretrain=False, tune=False,
+		     traj_length=20):
+
+		# assert probmodel.log_prob().keys()[:3] == ['log_prob', 'data', ]
+
+		Sampler_Chain.__init__(self, probmodel, step_size, num_steps, burn_in, pretrain, tune)
+
+		self.traj_length = traj_length
+
+		self.optim = SGNHT_Optim(self.probmodel,
+					step_size=step_size,
+					prior_std=1.)
+
+		# print(f"{self.optim.A=}")
+		# print(f"{self.optim.num_params=}")
+		# print(f"{self.optim.A=}")
+		# exit()
+
+		# self.acceptance = SDE_Acceptance()
+		self.acceptance = MetropolisHastingsAcceptance()
+
+	def __repr__(self):
+		return 'SGNHT'
+
+	def sample_chain(self):
+
+		self.probmodel.reset_parameters()
+
+		if self.pretrain:
+			try:
+				self.probmodel.pretrain()
+			except:
+				warnings.warn(f'Tried pretraining but couldnt find a probmodel.pretrain() method ... Continuing wihtout pretraining.')
+
+		if self.tune: self.tune_step_size()
+
+		self.chain = Chain(probmodel=self.probmodel)
+		self.optim.sample_momentum()
+		self.optim.sample_thermostat()
+
+		progress = tqdm(range(self.num_steps))
+		for step in progress:
+
+			proposal_log_prob, sample = self.propose()
+			accept, log_ratio = self.acceptance(proposal_log_prob['log_prob'], self.chain.state['log_prob']['log_prob'])
+			self.chain += (self.probmodel, proposal_log_prob, accept)
+
+			desc = f'{str(self)}: Accept: {self.chain.running_accepts.avg:.2f}/{self.chain.accept_ratio:.2f} \t'
+			for key, running_avg in self.chain.running_avgs.items():
+				desc += f' {key}: {running_avg.avg:.2f} '
+			desc += f'StepSize: {self.optim.param_groups[0]["step_size"]:.3f}'
+			progress.set_description(desc=desc)
+
+		self.chain = self.chain[self.burn_in:]
+
+		return self.chain
+
+	def propose(self):
+		'''
+		1) sample momentum for each parameter
+		2) sample one minibatch for an entire trajectory
+		3) solve trajectory forward for self.traj_length steps
+		'''
+
+		hamiltonian_solver = ['euler', 'leapfrog'][0]
+
+		# self.optim.sample_momentum()
+		# self.optim.sample_thermostat()
+		batch = next(self.probmodel.dataloader.__iter__()) # samples one minibatch from dataloader
+
+		self.optim.zero_grad()
+		proposal_log_prob = self.probmodel.log_prob(*batch)
+		(-proposal_log_prob['log_prob']).backward()
+		self.optim.step()
+
+		# def closure():
+		# 	'''
+		# 	Computes the gradients once for batch
+		# 	'''
+		# 	self.optim.zero_grad()
+		# 	log_prob = self.probmodel.log_prob(*batch)
+		# 	(-log_prob['log_prob']).backward()
+		# 	return log_prob
+		#
+		# if hamiltonian_solver=='leapfrog': log_prob = closure() # compute initial grads
+		#
+		# for traj_step in range(self.traj_length):
+		# 	if hamiltonian_solver=='euler':
+		# 		proposal_log_prob = closure()
+		# 		self.optim.step()
+		# 	elif hamiltonian_solver=='leapfrog':
+		# 		proposal_log_prob = self.optim.leapfrog_step(closure)
+		#
+		# accept, log_ratio = self.acceptance(proposal_log_prob['log_prob'], self.chain.state['log_prob']['log_prob'])
+		#
+		# if not accept:
+		# 	if torch.isnan(proposal_log_prob['log_prob']):
+		# 		print(f"{proposal_log_prob=}")
+		# 		print(self.chain.state)
+		# 		exit()
+		# 	self.probmodel.load_state_dict(self.chain.state['state_dict'])
+
+		return proposal_log_prob, self.probmodel
+

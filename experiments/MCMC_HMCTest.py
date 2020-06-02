@@ -16,22 +16,22 @@ SEED = 0
 # np.random.seed(SEED)
 
 from pytorch_MCMC.models.MCMC_Models import GMM, LinReg, RegressionNNHomo, RegressionNNHetero
-from pytorch_MCMC.src.MCMC_Sampler import SGLD_Sampler, MALA_Sampler, HMC_Sampler
+from pytorch_MCMC.src.MCMC_Sampler import SGLD_Sampler, MALA_Sampler, HMC_Sampler, SGNHT_Sampler
 from pytorch_MCMC.data.MCMC_SyntheticData import generate_linear_regression_data, generate_nonstationary_data
 from Utils.Utils import str2bool
 
 params = argparse.ArgumentParser(description='parser example')
 params.add_argument('-logname', 	type=str, default='Tmp')
 
-params.add_argument('-num_samples', 	type=int, default=500)
-params.add_argument('-model',	 	choices=['gmm', 'linreg', 'regnn'], default='regnn')
-params.add_argument('-sampler', 	choices=['sgld','mala', 'hmc'], default='sgld')
+params.add_argument('-num_samples', 	type=int, default=200)
+params.add_argument('-model',	 	choices=['gmm', 'linreg', 'regnn'], default='gmm')
+params.add_argument('-sampler', 	choices=['sgld','mala', 'hmc', 'sgnht'], default='sgnht')
 
-params.add_argument('-step_size', 	type=float, default=0.00001)
-params.add_argument('-num_steps', 	type=int, default=3000)
-params.add_argument('-pretrain', 	type=str2bool, default=True)
+params.add_argument('-step_size', 	type=float, default=0.1)
+params.add_argument('-num_steps', 	type=int, default=10000)
+params.add_argument('-pretrain', 	type=str2bool, default=False)
 params.add_argument('-tune', 		type=str2bool, default=False)
-params.add_argument('-burn_in', 	type=int, default=100)
+params.add_argument('-burn_in', 	type=int, default=2000)
 # params.add_argument('-num_chains', 		type=int, 	default=1)
 params.add_argument('-num_chains', 	type=int, default=os.cpu_count() - 1)
 params.add_argument('-batch_size', 	type=int, default=50)
@@ -86,6 +86,18 @@ if params.model == 'gmm':
 				      tune=params.tune,
 				      traj_length=params.hmc_traj_length,
 				      num_chains=params.num_chains)
+	elif params.sampler == 'sgnht':
+		sampler = SGNHT_Sampler(probmodel=gmm,
+					step_size=params.step_size,
+					num_steps=params.num_steps,
+					burn_in=params.burn_in,
+					pretrain=params.pretrain,
+					tune=params.tune,
+					traj_length=params.hmc_traj_length,
+					num_chains=params.num_chains)
+	else:
+		raise ValueError('No Sampler defined')
+
 	sampler.sample_chains()
 	sampler.posterior_dist()
 	# sampler.trace()
@@ -139,6 +151,17 @@ elif params.model == 'regnn':
 				      tune=params.tune,
 				      traj_length=params.hmc_traj_length,
 				      num_chains=params.num_chains)
+	elif params.sampler == 'sgnht':
+		sampler = SGNHT_Sampler(probmodel=nn,
+				      step_size=params.step_size,
+				      num_steps=params.num_steps,
+				      burn_in=params.burn_in,
+				      pretrain=params.pretrain,
+				      tune=params.tune,
+				      traj_length=params.hmc_traj_length,
+				      num_chains=params.num_chains)
+	else:
+		raise ValueError('No Sampler defined')
 	chains = sampler.sample_chains()
 
 	nn.predict(chains, plot=True)
