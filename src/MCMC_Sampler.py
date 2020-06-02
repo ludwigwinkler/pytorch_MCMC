@@ -252,39 +252,36 @@ class SGLD_Sampler(Sampler):
 		'''
 
 		assert isinstance(probmodel, ProbModel)
-		super().__init__(probmodel, step_size, num_steps, num_chains, burn_in, pretrain, tune)
+		Sampler.__init__(self, probmodel, step_size, num_steps, num_chains, burn_in, pretrain, tune)
 
 	def sample_chains(self):
 
-		self.parallel_chains = [SGLD_Chain(copy.deepcopy(self.probmodel),
-						   step_size=self.step_size,
-						   num_steps=self.num_steps,
-						   burn_in=self.burn_in,
-						   pretrain=self.pretrain,
-						   tune=False)
-					for _ in range(self.num_chains)]
-
-		parallel = ['joblib', 'concurrent'][0]
-
-		if parallel=='joblib':
+		if self.num_chains > 1:
+			self.parallel_chains = [SGLD_Chain(copy.deepcopy(self.probmodel),
+							   step_size=self.step_size,
+							   num_steps=self.num_steps,
+							   burn_in=self.burn_in,
+							   pretrain=self.pretrain,
+							   tune=False)
+						for _ in range(self.num_chains)]
 
 			chains = Parallel(n_jobs=self.num_chains)(delayed(chain.sample_chain)() for chain in self.parallel_chains)
 
-		elif parallel=='concurrent':
-
-			with concurrent.futures.ProcessPoolExecutor(max_workers=self.num_chains) as executor:
-				for chain in executor.map():
-					chain.sample_chain()
+		elif self.num_chains == 1:
+			chain = SGLD_Chain(copy.deepcopy(self.probmodel),
+					   step_size=self.step_size,
+					   num_steps=self.num_steps,
+					   burn_in=self.burn_in,
+					   pretrain=self.pretrain,
+					   tune=False)
+			chains = [chain.sample_chain()]
 
 		self.chain = Chain(probmodel=self.probmodel)
 
 		for chain in chains:
-
 			self.chain += chain
 
-
-		print(f'{len(self.chain)=}')
-
+		return chains
 
 	def __str__(self):
 		return 'SGLD'
@@ -304,10 +301,6 @@ class MALA_Sampler(Sampler):
 		super().__init__(probmodel, step_size, num_steps, num_chains, burn_in, pretrain, tune)
 
 	def sample_chains(self):
-
-
-
-		parallel = ['joblib', 'concurrent'][0]
 
 		if self.num_chains>1:
 			self.parallel_chains = [MALA_Chain(copy.deepcopy(self.probmodel),
@@ -333,10 +326,11 @@ class MALA_Sampler(Sampler):
 
 		self.chain = Chain(probmodel=self.probmodel)
 
-		for chain in chains:
 
+		for chain in chains:
 			self.chain += chain
 
+		return chains
 
 	def __str__(self):
 		return 'SGLD'
@@ -354,7 +348,7 @@ class HMC_Sampler(Sampler):
 		'''
 
 		assert isinstance(probmodel, ProbModel)
-		super().__init__(probmodel, step_size, num_steps, num_chains, burn_in, pretrain, tune)
+		Sampler.__init__(self, probmodel, step_size, num_steps, num_chains, burn_in, pretrain, tune)
 
 		self.traj_length = traj_length
 
@@ -363,41 +357,29 @@ class HMC_Sampler(Sampler):
 
 	def sample_chains(self):
 
-		self.parallel_chains = [HMC_Chain(copy.deepcopy(self.probmodel),
-						   step_size=self.step_size,
-						   num_steps=self.num_steps,
-						   burn_in=self.burn_in,
-						   pretrain=self.pretrain,
-						   tune=False)
-					for _ in range(self.num_chains)]
-
-		parallel = ['joblib', 'concurrent'][0]
-
-		if parallel=='joblib':
+		if self.num_chains > 1:
+			self.parallel_chains = [HMC_Chain(copy.deepcopy(self.probmodel),
+							   step_size=self.step_size,
+							   num_steps=self.num_steps,
+							   burn_in=self.burn_in,
+							   pretrain=self.pretrain,
+							   tune=self.tune)
+						for i in range(self.num_chains)]
 
 			chains = Parallel(n_jobs=self.num_chains)(delayed(chain.sample_chain)() for chain in self.parallel_chains)
 
-		elif parallel=='concurrent':
-
-			with concurrent.futures.ProcessPoolExecutor(max_workers=self.num_chains) as executor:
-				for chain in executor.map():
-					chain.sample_chain()
+		elif self.num_chains == 1:
+			chain = HMC_Chain(copy.deepcopy(self.probmodel),
+					   step_size=self.step_size,
+					   num_steps=self.num_steps,
+					   burn_in=self.burn_in,
+					   pretrain=self.pretrain,
+					   tune=self.tune)
+			chains = [chain.sample_chain()]
 
 		self.chain = Chain(probmodel=self.probmodel) # the aggregating chain
-
-		# torch.save(chains, 'GMM_chains.chain')
 
 		for chain in chains:
 			self.chain += chain
 
-	def sample_chain(self):
-
-		chain = HMC_Chain(	copy.deepcopy(self.probmodel),
-					step_size=self.step_size,
-					num_steps=self.num_steps,
-					burn_in=self.burn_in,
-					pretrain=self.pretrain,
-					tune=False,
-				  	traj_length=self.traj_length)
-
-		self.chain = chain.sample_chain()
+		return chains

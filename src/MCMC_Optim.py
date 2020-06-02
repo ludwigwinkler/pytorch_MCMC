@@ -155,8 +155,6 @@ class SGLD_Optim(Optimizer, MCMC_Optim):
 
 		for group in self.param_groups:
 
-			# print(f'{group["lr"]=}')
-
 			weight_decay = group['weight_decay']
 
 			for p in group['params']:
@@ -170,20 +168,12 @@ class SGLD_Optim(Optimizer, MCMC_Optim):
 					grad.add_(alpha=weight_decay, other=p.data)
 
 				if group['addnoise']:
-					# noise = p.data.new(p.data.size()).normal_(mean=0., std=1.).div_(group["lr"]**0.5)#.mul_(0.1)
-					# p.data.add_(alpha=-group['lr'], other=grad + noise)
-					noise = torch.randn_like(p.data).mul_(group['step_size'] ** 0.5)  # .mul_(0.1)
+
+					noise = torch.randn_like(p.data).mul_(group['step_size'] ** 0.5)
 
 					p.data.add_(grad, alpha=-0.5 * group['step_size'])
 					p.data.add_(noise)
 
-
-					# if torch.isnan(noise).any(): exit('Nan noise')
-					# if torch.isinf(noise).any(): exit('inf noise')
-
-
-					# p.data.add_(grad, alpha=-0.5*group['step_size'])
-					# p.data.add_(noise)
 					if torch.isnan(p.data).any(): exit('Nan param')
 					if torch.isinf(p.data).any(): exit('inf param')
 
@@ -269,7 +259,7 @@ class MALA_Optim(Optimizer, MCMC_Optim):
 
 class HMC_Optim(Optimizer, MCMC_Optim):
 
-	def __init__(self, model, step_size=0.1, prior_std=1., addnoise=True):
+	def __init__(self, model, step_size=0.1, prior_std=1.):
 		'''
 		log_N(θ|0,1) =
 		:param model:
@@ -286,7 +276,6 @@ class HMC_Optim(Optimizer, MCMC_Optim):
 
 		defaults = dict(step_size=step_size,
 				weight_decay=weight_decay,
-				addnoise=addnoise,
 				traj_step=0)
 
 		self.model = model

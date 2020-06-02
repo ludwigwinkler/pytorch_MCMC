@@ -16,6 +16,8 @@ from torch.utils.data import TensorDataset, DataLoader
 import torch.nn.functional as F
 from torch.distributions import MultivariateNormal, Categorical, Normal
 
+from joblib import Parallel, delayed
+
 Tensor = torch.Tensor
 FloatTensor = torch.FloatTensor
 
@@ -190,7 +192,146 @@ class LinReg(ProbModel):
 		plt.xlim(x_min, x_max)
 		plt.show()
 
-class RegressionNN(ProbModel):
+class RegressionNNHomo(ProbModel):
+
+	def __init__(self, x, y, batch_size=1):
+
+		self.data = x
+		self.target = y
+
+		# dataloader = DataLoader(TensorDataset(self.data, self.target), shuffle=True, batch_size=self.data.shape[0], drop_last=False)
+		dataloader = DataLoader(TensorDataset(self.data, self.target), shuffle=True, batch_size=batch_size, drop_last=False)
+
+		ProbModel.__init__(self, dataloader)
+
+		num_hidden = 50
+		self.model = Sequential(Linear(1, num_hidden),
+					ReLU(),
+					Linear(num_hidden, num_hidden),
+					ReLU(),
+					# Linear(num_hidden, num_hidden),
+					# ReLU(),
+					# Linear(num_hidden, num_hidden),
+					# ReLU(),
+					Linear(num_hidden, 1))
+
+		self.log_std = Parameter(FloatTensor([-1]))
+
+	def reset_parameters(self):
+		for module in self.model.modules():
+			if isinstance(module, Linear):
+				module.reset_parameters()
+
+		self.log_std.data = FloatTensor([3.])
+
+	def sample(self):
+		self.reset_parameters()
+
+	def forward(self, x):
+		pred = self.model(x)
+		return pred
+
+	def log_prob(self, data, target):
+
+		# if data is None and target is None:
+		# 	data, target = next(self.dataloader.__iter__())
+
+		mu = self.forward(data)
+		mse = F.mse_loss(mu,target)
+
+		log_prob = Normal(mu, F.softplus(self.log_std)).log_prob(target).mean()*len(self.dataloader.dataset)
+
+		return {'log_prob': log_prob, 'MSE': mse.detach_()}
+
+	def pretrain(self):
+
+		num_epochs = 200
+		optim = torch.optim.Adam(self.parameters(), lr=0.01)
+
+		# print(f"{F.softplus(self.log_std)=}")
+
+		progress = tqdm(range(num_epochs))
+		for epoch in progress:
+			for batch_i, (data, target) in enumerate(self.dataloader):
+				optim.zero_grad()
+				mu = self.forward(data)
+				loss = -Normal(mu, F.softplus(self.log_std)).log_prob(target).mean()
+				mse_loss = F.mse_loss(mu, target)
+				loss.backward()
+				optim.step()
+
+				desc = f'Pretraining: MSE:{mse_loss:.3f}'
+				progress.set_description(desc)
+
+		# print(f"{F.softplus(self.log_std)=}")
+
+	@torch.no_grad()
+	def predict(self, chains, plot=False):
+
+		x_min = 2*self.data.min()
+		x_max = 2*self.data.max()
+		data = torch.linspace(x_min, x_max).reshape(-1,1)
+
+		def parallel_predict(parallel_chain):
+			parallel_pred = []
+			for model_state_dict in parallel_chain.samples[::50]:
+				self.load_state_dict(model_state_dict)
+				pred_mu_i = self.forward(data)
+				parallel_pred.append(pred_mu_i)
+			try:
+				parallel_pred_mu = torch.stack(parallel_pred) # list [ pred_0, pred_1, ... pred_N] -> Tensor([pred_0, pred_1, ... pred_N])
+				return parallel_pred_mu
+			except:
+				pass
+
+
+		parallel_pred = Parallel(n_jobs=len(chains))(delayed(parallel_predict)(chain) for chain in chains)
+
+		pred = [parallel_pred_i for parallel_pred_i in parallel_pred if parallel_pred_i is not None] # flatten [ [pred_chain_0], [pred_chain_1] ... [pred_chain_N] ]
+		# pred_log_std = [parallel_pred_i for parallel_pred_i in parallel_pred_log_std if parallel_pred_i is not None] # flatten [ [pred_chain_0], [pred_chain_1] ... [pred_chain_N] ]
+
+
+		pred = torch.cat(pred).squeeze() # cat list of tensors to single prediciton tensor with samples in first dim
+		std = F.softplus(self.log_std)
+
+
+		epistemic = pred.std(dim=0)
+		aleatoric = std
+		total_std = (epistemic ** 2 + aleatoric ** 2) ** 0.5
+
+		mu = pred.mean(dim=0)
+		std = std.mean(dim=0)
+
+		data.squeeze_()
+
+		if plot:
+			fig, axs = plt.subplots(2, 2, sharex=True, sharey=True)
+			axs = axs.flatten()
+
+			axs[0].scatter(self.data, self.target, alpha=1, s=1, color='blue')
+			axs[0].plot(data.squeeze(), mu, alpha=1., color='red')
+			axs[0].fill_between(data, mu + total_std, mu - total_std, color='red', alpha=0.25)
+			axs[0].fill_between(data, mu + 2 * total_std, mu - 2 * total_std, color='red', alpha=0.10)
+			axs[0].fill_between(data, mu + 3 * total_std, mu - 3 * total_std, color='red', alpha=0.05)
+
+			[axs[1].plot(data, pred, alpha=0.1, color='red') for pred in pred]
+			axs[1].scatter(self.data, self.target, alpha=1, s=1, color='blue')
+
+			axs[2].scatter(self.data, self.target, alpha=1, s=1, color='blue')
+			axs[2].plot(data, mu, color='red')
+			axs[2].fill_between(data, mu - aleatoric, mu + aleatoric, color='red', alpha=0.25, label='Aleatoric')
+			axs[2].legend()
+
+			axs[3].scatter(self.data, self.target, alpha=1, s=1, color='blue')
+			axs[3].plot(data, mu, color='red')
+			axs[3].fill_between(data, mu - epistemic, mu + epistemic, color='red', alpha=0.25, label='Epistemic')
+			axs[3].legend()
+
+			plt.ylim(2 * self.target.min(), 2 * self.target.max())
+			plt.xlim(x_min, x_max)
+			plt.show()
+
+class RegressionNNHetero(ProbModel):
 
 	def __init__(self, x, y, batch_size=1):
 
@@ -216,9 +357,6 @@ class RegressionNN(ProbModel):
 					# ReLU(),
 					Linear(num_hidden, 2))
 
-		# self.log_std = Parameter(FloatTensor([-5]))
-		self.log_std = FloatTensor([1.])
-
 	def reset_parameters(self):
 		for module in self.model.modules():
 			if isinstance(module, Linear):
@@ -240,56 +378,97 @@ class RegressionNN(ProbModel):
 		mu, log_std = self.forward(data)
 		mse = F.mse_loss(mu,target)
 
-		log_prob = Normal(mu, F.softplus(self.log_std)).log_prob(target).sum()*len(self.dataloader)
+		log_prob = Normal(mu, F.softplus(log_std)).log_prob(target).mean()*len(self.dataloader.dataset)
 
 		return {'log_prob': log_prob, 'MSE': mse.detach_()}
 
 	def pretrain(self):
 
-		num_epochs = 50
-		optim = torch.optim.Adam(self.parameters(), lr=0.01, weight_decay=0.0001)
+		num_epochs = 100
+		optim = torch.optim.Adam(self.parameters(), lr=0.001)
 
 		progress = tqdm(range(num_epochs))
 		for epoch in progress:
 			for batch_i, (data, target) in enumerate(self.dataloader):
 				optim.zero_grad()
-				pred = self.forward(data)[0]
-				loss = F.mse_loss(pred, target)
+				mu, log_std = self.forward(data)
+				loss = -Normal(mu, F.softplus(log_std)).log_prob(target).mean()
+				mse_loss = F.mse_loss(mu, target)
 				loss.backward()
 				optim.step()
 
-				desc = f'Pretraining: MSE:{loss:.3f}'
+				desc = f'Pretraining: MSE:{mse_loss:.3f}'
 				progress.set_description(desc)
 
 	@torch.no_grad()
-	def predict(self, chain, plot=False):
+	def predict(self, chains, plot=False):
 
 		x_min = 2*self.data.min()
 		x_max = 2*self.data.max()
 		data = torch.linspace(x_min, x_max).reshape(-1,1)
 
-		pred = []
+		def parallel_predict(parallel_chain):
+			parallel_pred_mu = []
+			parallel_pred_log_std = []
+			for model_state_dict in parallel_chain.samples[::50]:
+				self.load_state_dict(model_state_dict)
+				pred_mu_i, pred_log_std_i = self.forward(data)
+				parallel_pred_mu.append(pred_mu_i)
+				parallel_pred_log_std.append(pred_log_std_i)
 
-		# every_nth_samples = int(len(chain)/500)
-		every_nth_samples = int(1)
+			try:
+				parallel_pred_mu = torch.stack(parallel_pred_mu) # list [ pred_0, pred_1, ... pred_N] -> Tensor([pred_0, pred_1, ... pred_N])
+				parallel_pred_log_std = torch.stack(parallel_pred_log_std) # list [ pred_0, pred_1, ... pred_N] -> Tensor([pred_0, pred_1, ... pred_N])
+				return parallel_pred_mu, parallel_pred_log_std
+			except:
+				pass
 
-		for model_state_dict in chain.samples[::every_nth_samples]:
-			self.load_state_dict(model_state_dict)
-			pred_mu_i, pred_mu_log_std = self.forward(data)
-			pred.append(pred_mu_i)
 
-		pred = torch.stack(pred)
-		# print(pred.shape)
+		parallel_pred_mu, parallel_pred_log_std = zip(*Parallel(n_jobs=len(chains))(delayed(parallel_predict)(chain) for chain in chains))
 
-		mu 	= pred.mean(dim=0).squeeze()
-		std 	= pred.std(dim=0).squeeze()
+		pred_mu = [parallel_pred_i for parallel_pred_i in parallel_pred_mu if parallel_pred_i is not None] # flatten [ [pred_chain_0], [pred_chain_1] ... [pred_chain_N] ]
+		pred_log_std = [parallel_pred_i for parallel_pred_i in parallel_pred_log_std if parallel_pred_i is not None] # flatten [ [pred_chain_0], [pred_chain_1] ... [pred_chain_N] ]
+
+
+		pred_mu = torch.cat(pred_mu).squeeze() # cat list of tensors to single prediciton tensor with samples in first dim
+		pred_log_std = torch.cat(pred_log_std).squeeze() # cat list of tensors to single prediciton tensor with samples in first dim
+
+		mu 	= pred_mu.squeeze()
+		std 	= F.softplus(pred_log_std).squeeze()
+
+		epistemic = mu.std(dim=0)
+		aleatoric = (std**2).mean(dim=0)**0.5
+		total_std = (epistemic**2 + aleatoric**2)**0.5
+
+		mu = mu.mean(dim=0)
+		std = std.mean(dim=0)
+
+		data.squeeze_()
 
 		if plot:
-			plt.plot(data.squeeze(), mu, alpha=1., color='red')
-			plt.fill_between(data.squeeze(), mu+std, mu-std, color='red', alpha=0.25)
-			plt.fill_between(data.squeeze(), mu+2*std, mu-2*std, color='red', alpha=0.10)
-			plt.fill_between(data.squeeze(), mu+3*std, mu-3*std, color='red', alpha=0.05)
-			plt.scatter(self.data, self.target, alpha=1, s=1, color='blue')
+
+			fig, axs = plt.subplots(2,2, sharex=True, sharey=True)
+			axs = axs.flatten()
+
+			axs[0].scatter(self.data, self.target, alpha=1, s=1, color='blue')
+			axs[0].plot(data.squeeze(), mu, alpha=1., color='red')
+			axs[0].fill_between(data, mu+std, mu-std, color='red', alpha=0.25)
+			axs[0].fill_between(data, mu+2*std, mu-2*std, color='red', alpha=0.10)
+			axs[0].fill_between(data, mu+3*std, mu-3*std, color='red', alpha=0.05)
+
+			[axs[1].plot(data, pred, alpha=0.1, color='red') for pred in pred_mu]
+			axs[1].scatter(self.data, self.target, alpha=1, s=1, color='blue')
+
+			axs[2].scatter(self.data, self.target, alpha=1, s=1, color='blue')
+			axs[2].plot(data, mu, color='red')
+			axs[2].fill_between(data, mu-aleatoric, mu+aleatoric, color='red', alpha=0.25, label='Aleatoric')
+			axs[2].legend()
+
+			axs[3].scatter(self.data, self.target, alpha=1, s=1, color='blue')
+			axs[3].plot(data, mu, color='red')
+			axs[3].fill_between(data, mu-epistemic, mu+epistemic, color='red', alpha=0.25, label='Epistemic')
+			axs[3].legend()
+
 			plt.ylim(2*self.target.min(), 2*self.target.max())
 			plt.xlim(x_min, x_max)
 			plt.show()

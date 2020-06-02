@@ -58,22 +58,21 @@ def generate_multimodal_linear_regression(num_samples, y_noise=1, x_noise=1, plo
 	return x, y
 
 
-def generate_nonstationary_data(num_samples=1000, x_noise_std=0.01, y_noise_std=1., plot=False):
-	x = np.linspace(-0.35, 0.55, num_samples)
-	x_noise = np.random.normal(0., x_noise_std, size=x.shape)
-	y_noise = np.random.normal(0., y_noise_std, size=x.shape)
+def generate_nonstationary_data(num_samples=1000, y_constant_noise_std=0.1, y_nonstationary_noise_std=1., plot=False):
+	x = np.linspace(-0.35, 0.45, num_samples)
+	x_noise = np.random.normal(0., 0.01, size=x.shape)
 
-
-	std = np.linspace(0, y_noise_std, num_samples)  # * _y_noise_std
-
+	constant_noise = np.random.normal(0, y_constant_noise_std, size=x.shape)
+	std = np.linspace(0, y_nonstationary_noise_std, num_samples)  # * _y_noise_std
 	non_stationary_noise = np.random.normal(loc=0, scale=std)
-	y_noise = non_stationary_noise
 
-	y = x + 0.3 * np.sin(2 * np.pi * (x + x_noise)) + 0.3 * np.sin(4 * np.pi * (x + x_noise)) + y_noise
+	y = x + 0.3 * np.sin(2 * np.pi * (x + x_noise)) + 0.3 * np.sin(4 * np.pi * (x + x_noise)) + non_stationary_noise + constant_noise
 
 	x = torch.from_numpy(x).reshape(-1, 1).float()
 	y = torch.from_numpy(y).reshape(-1, 1).float()
-	# y = y.reshape(-1, 1)
+
+	x = (x - x.mean(dim=0))/(x.std(dim=0)+1e-3)
+	y = (y - y.mean(dim=0))/(y.std(dim=0)+1e-3)
 
 	if plot:
 		plt.scatter(x, y)

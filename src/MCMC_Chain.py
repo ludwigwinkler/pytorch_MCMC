@@ -288,13 +288,13 @@ class Sampler_Chain:
 		progress = tqdm(range(self.num_steps))
 		for step in progress:
 
-			sample_log_prob, sample = self.propose()
-			accept, log_ratio = self.acceptance(sample_log_prob['log_prob'], self.chain.state['log_prob']['log_prob'])
-			self.chain += (self.probmodel, sample_log_prob, accept)
+			proposal_log_prob, sample = self.propose()
+			accept, log_ratio = self.acceptance(proposal_log_prob['log_prob'], self.chain.state['log_prob']['log_prob'])
+			self.chain += (self.probmodel, proposal_log_prob, accept)
 
 			if not accept:
 
-				if torch.isnan(sample_log_prob['log_prob']):
+				if torch.isnan(proposal_log_prob['log_prob']):
 					print(self.chain.state)
 					exit()
 				self.probmodel.load_state_dict(self.chain.state['state_dict'])
@@ -303,10 +303,10 @@ class Sampler_Chain:
 			for key, running_avg in self.chain.running_avgs.items():
 				desc += f' {key}: {running_avg.avg:.2f} '
 			desc += f'StepSize: {self.optim.param_groups[0]["step_size"]:.3f}'
+			# desc +=f" Std: {F.softplus(self.probmodel.log_std.detach()).item():.3f}"
 			progress.set_description(desc=desc)
 
-		# self.chain = self.chain[self.burn_in:]
-		# print(f'{len(self.chain.samples)=}')
+		self.chain = self.chain[self.burn_in:]
 
 		return self.chain
 
@@ -330,7 +330,8 @@ class SGLD_Chain(Sampler_Chain):
 	def propose(self):
 
 		self.optim.zero_grad()
-		log_prob = self.probmodel.log_prob()
+		batch = next(self.probmodel.dataloader.__iter__())
+		log_prob = self.probmodel.log_prob(*batch)
 		(-log_prob['log_prob']).backward()
 		self.optim.step()
 
@@ -346,10 +347,11 @@ class MALA_Chain(Sampler_Chain):
 
 		self.optim = MALA_Optim(self.probmodel,
 					step_size=step_size,
-					prior_std=0.,
+					prior_std=1.,
 					addnoise=True)
 
 		self.acceptance = MetropolisHastingsAcceptance()
+		# self.acceptance = SDE_Acceptance()
 
 	def __repr__(self):
 		return 'MALA'
@@ -378,10 +380,10 @@ class HMC_Chain(Sampler_Chain):
 
 		self.optim = HMC_Optim(self.probmodel,
 					step_size=step_size,
-					prior_std=0.,
-					addnoise=True)
+					prior_std=1.)
 
-		self.acceptance = SDE_Acceptance()
+		# self.acceptance = SDE_Acceptance()
+		self.acceptance = MetropolisHastingsAcceptance()
 
 	def __repr__(self):
 		return 'HMC'
@@ -400,7 +402,7 @@ class HMC_Chain(Sampler_Chain):
 
 		self.chain = Chain(probmodel=self.probmodel)
 
-		progress = tqdm(range(self.num_steps//self.traj_length))
+		progress = tqdm(range(self.num_steps))
 		for step in progress:
 
 			_ = self.propose() # values are added directly to self.chain
@@ -422,7 +424,7 @@ class HMC_Chain(Sampler_Chain):
 		3) solve trajectory forward for self.traj_length steps
 		'''
 
-		hamiltonian_solver = ['euler', 'leapfrog'][1]
+		hamiltonian_solver = ['euler', 'leapfrog'][0]
 
 		self.optim.sample_momentum()
 		batch = next(self.probmodel.dataloader.__iter__()) # samples one minibatch from dataloader
@@ -440,9 +442,18 @@ class HMC_Chain(Sampler_Chain):
 
 		for traj_step in range(self.traj_length):
 			if hamiltonian_solver=='euler':
-				log_prob = closure()
+				proposal_log_prob = closure()
 				self.optim.step()
 			elif hamiltonian_solver=='leapfrog':
-				log_prob = self.optim.leapfrog_step(closure)
+				proposal_log_prob = self.optim.leapfrog_step(closure)
 
-			self.chain += (self.probmodel, log_prob, True)
+		accept, log_ratio = self.acceptance(proposal_log_prob['log_prob'], self.chain.state['log_prob']['log_prob'])
+
+		if not accept:
+			if torch.isnan(proposal_log_prob['log_prob']):
+				print(f"{proposal_log_prob=}")
+				print(self.chain.state)
+				exit()
+			self.probmodel.load_state_dict(self.chain.state['state_dict'])
+
+		self.chain += (self.probmodel, proposal_log_prob, accept)
