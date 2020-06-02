@@ -27,9 +27,6 @@ Especially the gradient samplers are designed around PyTorch's `optim` class to 
 
 # ProbModel
 
-The most important equation in Bayesian machine learning is:
-
-
 The wrapper `MCMC.src.MCMC_ProbModel` defines are small set of functions which are required in order to allow the `Sampler_Chain` to interact with it and evaluate the relevant quantities.
 
 Any parameter in the model that we wish to sample from has to be designated a `torch.nn.Parameter()`.
