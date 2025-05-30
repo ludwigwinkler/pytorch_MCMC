@@ -1,3 +1,11 @@
+# TODO:
+
+- functionalize forward calls such that multiple models can be evaluated on the same or multiple data -> multiple chains in parallel on same GPU
+- make acceptance sampler keep same model twice on GPU/Memory, naturally
+- use pytorch lightning with automatic_optimization=False? would be good for multi-gpu support
+- switch statements for tuning of metropolis hasting sampler
+
+
 
 # torch-MC^2 (torch-MCMC)
 HMC on 3 layer NN | HMC on GMM
