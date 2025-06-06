@@ -1,0 +1,39 @@
+
+[tool.black]
+line-length = 80
+
+[tool.ty.environment]
+python = "/Users/ludwigwinkler/mamba/envs/mcmc/bin/python"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel", "setuptools_scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "causality"
+dynamic = ["version"]
+dependencies = [
+	"torch",
+	"matplotlib",
+	"einops",
+	"lightning",
+	"ipykernel",
+	"pytest",
+	"pytest-xdist",
+	"hydra-core",
+]
+readme = "README.md"
+requires-python = ">=3.7"
+
+[project.optional-dependencies]
+test = ["pytest"]
+dev = ["pre-commit"]
+
+
+[tool.setuptools]
+# tell setuptools where to find packages
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["causality*"]

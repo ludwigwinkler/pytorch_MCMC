@@ -267,4 +267,3 @@ _ = plt.hist(
 )
 # plt.plot(x.numpy(), gmm.prob(x).numpy(), label="GMM PDF", color="orange")
 # plt.plot(x.numpy(), energy_t(x).numpy(), label="Normal PDF", color="blue")
-
