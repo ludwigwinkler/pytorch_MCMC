@@ -10,7 +10,7 @@ requires = ["setuptools>=61.0", "wheel", "setuptools_scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "causality"
+name = "mcmc"
 dynamic = ["version"]
 dependencies = [
 	"torch",
@@ -29,11 +29,9 @@ requires-python = ">=3.7"
 test = ["pytest"]
 dev = ["pre-commit"]
 
-
 [tool.setuptools]
 # tell setuptools where to find packages
-package-dir = { "" = "src" }
+package-dir = { "" = "src/mcmc" }
 
 [tool.setuptools.packages.find]
-where = ["src"]
-include = ["causality*"]
+where = ["src/mcmc"]

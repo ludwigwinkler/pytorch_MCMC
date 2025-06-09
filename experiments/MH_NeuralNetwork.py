@@ -6,12 +6,12 @@ import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from numbers import Number
 
-# import mcmc.sampler.MetropolisHastingAcceptance
-# from mcmc.sampler import MetropolisHastingAcceptance
-
 from mcmc.sampler import MetropolisHastingsAcceptance
 from mcmc.energy import GaussianMixture1D, GaussianMixture2D
-from mcmc.utils import EMA
+from mcmc.utils import EMA, RepeatedCosineSchedule
+from mcmc.data import generate_nonstationary_data, generate_multimodal_linear_regression
+
+from torch.nn import Sequential, Linear, ReLU
 
 plt.style.use("default")
 plt.rcParams["axes.facecolor"] = "white"
@@ -27,42 +27,35 @@ plt.rcParams["legend.edgecolor"] = "black"
 plt.rcParams["legend.facecolor"] = "white"
 
 
-gmm2d = GaussianMixture2D()
-samples2d = gmm2d.sample(50_000)
+x, y = generate_nonstationary_data(
+    num_samples=1_000,
+    plot=True,
+    y_nonstationary_noise_std=0.1,
+    y_constant_noise_std=0.1,
+)
 
-# 2D contour plot of samples2d
-x = samples2d[:, 0].numpy()
-y = samples2d[:, 1].numpy()
-plt.figure(figsize=(6, 5))
-plt.hist2d(x, y, bins=100, density=True, cmap="viridis")
-plt.colorbar(label="Density")
-plt.xlabel("x")
-plt.ylabel("y")
-plt.title("2D Gaussian Mixture Samples")
-plt.show()
+model = torch.nn.Sequential(torch.)
+
 
 # %%
-num_chains = 5000
+num_chains = 50_000
 proposal_std = 0.5
-gmm = GaussianMixture1D(
-    means=[-3.0, 0.0, 3.0],
-    stds=[0.5, 0.5, 0.5],
-    weights=[2, 0.3, 0.1],
-)
 vmap_energy = torch.vmap(gmm.energy, (0,))
-init_sample = TensorDict({"x": 3 * torch.randn((num_chains, 1)).clamp(-5, 5)})
+init_sample = TensorDict({"x": 3 * torch.randn((num_chains, 2)).clamp(-5, 5)})
 init_energy = vmap_energy(init_sample["x"])
 chain = [(init_sample, init_energy)]
 
 
-num_steps = 5_000
+num_steps = [100, 1_000][1]
 accept_ema = EMA(ema_weight=0.99)
 pbar = tqdm(range(num_steps))
+schedule = RepeatedCosineSchedule(steps=num_steps, cycles=5)
 MH = MetropolisHastingsAcceptance()
 for step in pbar:
     state, energy = chain[-1]
+    proposal_std_ = schedule(step=step, min=0.1, max=1.0)
     proposal_state = state.clone().apply(
-        lambda x: x + torch.randn_like(x) * proposal_std
+        lambda x: x + torch.randn_like(x) * proposal_std_
     )
     proposal_energy = vmap_energy(proposal_state["x"])
     accept: torch.Tensor = MH(energy, proposal_energy)
@@ -73,13 +66,20 @@ for step in pbar:
     chain += [(new_state, proposal_energy)]
     accept_ratio = accept.sum() / accept.numel()
     accept_ema(accept_ratio.item())
-    pbar.set_postfix({"Accept": float(accept_ema.val), "PropStd": proposal_std})
+    pbar.set_postfix(
+        {
+            "Accept": f"{accept_ema.val:.3f}",
+            "PropStd": f"{proposal_std_:.3f}",
+        }
+    )
 
-data = chain[-1][0]["x"]
-data = data[-5 <= data]
-data = data[data <= 5]
-plt.hist(chain[0][0]["x"], density=True, bins=50, color="green", alpha=0.5)
-plt.hist(data, density=True, bins=50, color="b", alpha=0.5)
-
-plt.plot(torch.linspace(-5, 5, 100), gmm.prob(torch.linspace(-5, 5, 100)))
-# plt.plot(torch.linspace(-5, 5, 100), -gmm.energy(torch.linspace(-5, 5, 100)))
+samples = chain[-1][0]["x"]
+x = samples[:, 0].numpy()
+y = samples[:, 1].numpy()
+plt.figure(figsize=(6, 5))
+plt.hist2d(x, y, bins=100, density=True, cmap="viridis")
+plt.colorbar(label="Density")
+plt.xlabel("x")
+plt.ylabel("y")
+plt.title("2D Gaussian Mixture Samples")
+plt.show()
