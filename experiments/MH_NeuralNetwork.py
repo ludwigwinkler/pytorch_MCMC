@@ -139,3 +139,6 @@ for i in range(num_chains):
 plt.xlabel("x")
 plt.ylabel("y")
 plt.title("Model Prediction vs Data")
+
+# %%
+print("Done")
