@@ -49,7 +49,7 @@ class ProbModel(torch.nn.Module):
         return 0.5 * (self.model(x) - y) ** 2
 
 
-num_chains = 123
+num_chains = 50
 base_model = torch.nn.Sequential(
     Linear(1, 32),
     ReLU(),
@@ -87,7 +87,7 @@ proposal_std = 0.1
 chain = [((TensorDict(params), TensorDict(buffers)), init_energy)]
 
 
-num_steps = [300, 1_000][1]
+num_steps = [500, 1_000][1]
 accept_ema = EMA(ema_weight=0.99)
 pbar = tqdm(range(num_steps))
 schedule = RepeatedCosineSchedule(steps=num_steps, cycles=5)
