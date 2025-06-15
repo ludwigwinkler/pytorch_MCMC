@@ -68,6 +68,9 @@ class RepeatedCosineSchedule:
     cycles: int
 
     def __call__(self, step, min, max):
-        cycle_pos = (step / self.steps) * self.cycles * math.pi
-        cosine = 0.5 * (1 + math.cos(cycle_pos))
-        return min + (max - min) * cosine
+        if step < self.steps:
+            cycle_pos = (step / self.steps) * self.cycles * math.pi
+            cosine = 0.5 * (1 + math.cos(cycle_pos))
+            return min + (max - min) * cosine
+        else:
+            return min

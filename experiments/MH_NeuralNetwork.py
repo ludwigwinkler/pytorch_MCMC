@@ -101,6 +101,43 @@ def single_energy(params, buffers, data, target):
 vmap_energy = torch.vmap(single_energy, (0, 0, None, None), randomness="different")
 init_energy = vmap_energy(params, buffers, x, y)
 
+# %%
+
+
+def plot_uncertainty(params, buffers, str=""):
+    x_test = torch.linspace(-5, 5, 100).unsqueeze(-1)
+    mu, std = torch.vmap(single_forward, (0, 0, None), randomness="different")(
+        params, buffers, x_test
+    )
+    mu, std = mu.detach().numpy(), std.detach().numpy()
+    plt.figure(figsize=(8, 6))
+    plt.scatter(x.squeeze(-1), y.squeeze(-1), label="Data", color="blue", s=1)
+    for i in range(num_chains):
+        plt.plot(x_test.squeeze(-1), mu[i].squeeze(-1), color="red", alpha=0.1)
+
+    # Plot mean prediction and uncertainty bands
+    mean_pred = mu.mean(axis=0).squeeze(-1)
+    mean_std = std.mean(axis=0).squeeze(-1)
+    plt.plot(x_test.squeeze(-1), mean_pred, color="black", label="Mean Prediction")
+    for k, alpha in zip([1, 2, 3], [0.2, 0.1, 0.05]):
+        plt.fill_between(
+            x_test.squeeze(-1),
+            mean_pred - k * mean_std,
+            mean_pred + k * mean_std,
+            color="red",
+            alpha=alpha,
+            label=f"{k} std" if k == 1 else None,
+        )
+    plt.legend()
+    plt.xlabel("x")
+    plt.ylabel("y")
+    plt.ylim(-3, 3)
+    plt.title("Model Prediction " + str)
+    plt.show()
+
+
+plot_uncertainty(params, buffers)
+
 
 # %%
 
@@ -108,11 +145,11 @@ proposal_std = 0.1
 chain = [((TensorDict(params), TensorDict(buffers)), init_energy)]
 
 
-num_steps = [100, 1000][1]
+num_steps = [100, 2000][1]
 accept_ema = EMA(ema_weight=0.99)
-energy_ema = EMA(ema_weight=0.99)
+energy_ema = EMA(ema_weight=0.9)
 pbar = tqdm(range(num_steps))
-schedule = RepeatedCosineSchedule(steps=num_steps, cycles=1)
+schedule = RepeatedCosineSchedule(steps=num_steps // 2, cycles=1)
 MH = MetropolisHastingsAcceptance()
 for step in pbar:
     (params, buffers), energy = chain[-1]
@@ -148,39 +185,9 @@ for step in pbar:
             "Energy": f"{energy_ema.val:.3f}",
         }
     )
+    if step % (num_steps // 5) == 0 or step == num_steps - 1:
+        plot_uncertainty(new_params.to_dict(), buffers.to_dict(), str=f"Step {step}")
+        # plt.savefig(f"MH_NeuralNetwork_step_{step}.png", dpi=300)
+        # plt.close()
 
 # %%
-
-(params, buffers), energy = chain[-1]
-params, buffers = params.to_dict(), buffers.to_dict()
-x_test = torch.linspace(-5, 5, 100).unsqueeze(-1)
-mu, std = torch.vmap(single_forward, (0, 0, None), randomness="different")(
-    params, buffers, x_test
-)
-mu, std = mu.detach().numpy(), std.detach().numpy()
-plt.figure(figsize=(8, 6))
-plt.scatter(x.squeeze(-1), y.squeeze(-1), label="Data", color="blue", s=1)
-for i in range(num_chains):
-    plt.plot(x_test.squeeze(-1), mu[i].squeeze(-1), color="red", alpha=0.1)
-
-# Plot mean prediction and uncertainty bands
-mean_pred = mu.mean(axis=0).squeeze(-1)
-mean_std = std.mean(axis=0).squeeze(-1)
-plt.plot(x_test.squeeze(-1), mean_pred, color="black", label="Mean Prediction")
-for k, alpha in zip([1, 2, 3], [0.2, 0.1, 0.05]):
-    plt.fill_between(
-        x_test.squeeze(-1),
-        mean_pred - k * mean_std,
-        mean_pred + k * mean_std,
-        color="red",
-        alpha=alpha,
-        label=f"{k} std" if k == 1 else None,
-    )
-plt.legend()
-plt.xlabel("x")
-plt.ylabel("y")
-plt.ylim(-3, 3)
-plt.title("Model Prediction vs Data")
-
-# %%
-print("Done")
