@@ -72,8 +72,8 @@ def generate_nonstationary_data(
     x = torch.from_numpy(x).reshape(-1, 1).float()
     y = torch.from_numpy(y).reshape(-1, 1).float()
 
-    # x = (x - x.mean(dim=0)) / (x.std(dim=0) + 1e-3)
-    # y = (y - y.mean(dim=0)) / (y.std(dim=0) + 1e-3)
+    x = (x - x.mean(dim=0)) / (x.std(dim=0) + 1e-3)
+    y = (y - y.mean(dim=0)) / (y.std(dim=0) + 1e-3)
 
     if plot:
         plt.scatter(x, y, s=1, alpha=0.5)
