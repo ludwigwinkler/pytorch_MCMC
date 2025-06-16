@@ -67,9 +67,9 @@ class ProbModel(torch.nn.Module):
                 print(f"Step {step}, Loss: {loss.item()}, MSE: {mse.item()}")
 
 
-num_chains = 25
+num_chains = 10
 nn = torch.nn.Sequential(
-    # BatchNorm1d(1),
+    BatchNorm1d(1),
     Linear(1, 32),
     Tanh(),
     Linear(32, 64),
@@ -88,29 +88,29 @@ models = [copy.deepcopy(probmodel) for _ in range(num_chains)]
 params, buffers = torch.func.stack_module_state(models)
 
 
-def single_forward(params, buffers, data):
-    return torch.func.functional_call(probmodel, (params, buffers), (data,))
+def single_predict(params, buffers, data):
+    return torch.func.functional_call(probmodel.eval(), (params, buffers), (data,))
 
 
-def single_energy(params, buffers, data, target):
-    mu, std = torch.func.functional_call(probmodel, (params, buffers), (data,))
+def single_energy(prob_model, params, buffers, data, target):
+    mu, std = torch.func.functional_call(prob_model, (params, buffers), (data,))
     energy = probmodel.energy(mu, std, target).mean(dim=-2)
     return energy
 
 
-vmap_energy = torch.vmap(single_energy, (0, 0, None, None), randomness="different")
-init_energy = vmap_energy(params, buffers, x, y)
+vmap_energy = torch.vmap(single_energy, (None, 0, 0, None, None), randomness="different")
+init_energy = vmap_energy(probmodel.eval(), params, buffers, x, y)
 
 # %%
 
 
 def plot_uncertainty(params, buffers, str=""):
-    x_test = torch.linspace(-5, 5, 100).unsqueeze(-1)
-    mu, std = torch.vmap(single_forward, (0, 0, None), randomness="different")(
+    x_test = torch.linspace(-4, 4, 100).unsqueeze(-1)
+    mu, std = torch.vmap(single_predict, (0, 0, None), randomness="different")(
         params, buffers, x_test
     )
     mu, std = mu.detach().numpy(), std.detach().numpy()
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(12, 6))
     plt.scatter(x.squeeze(-1), y.squeeze(-1), label="Data", color="blue", s=1)
     for i in range(num_chains):
         plt.plot(x_test.squeeze(-1), mu[i].squeeze(-1), color="red", alpha=0.1)
@@ -131,7 +131,7 @@ def plot_uncertainty(params, buffers, str=""):
     plt.legend()
     plt.xlabel("x")
     plt.ylabel("y")
-    plt.ylim(-3, 3)
+    plt.ylim(-2, 2)
     plt.title("Model Prediction " + str)
     plt.show()
 
@@ -145,7 +145,7 @@ proposal_std = 0.1
 chain = [((TensorDict(params), TensorDict(buffers)), init_energy)]
 
 
-num_steps = [100, 2000][1]
+num_steps = [100, 500, 2000][2]
 accept_ema = EMA(ema_weight=0.99)
 energy_ema = EMA(ema_weight=0.9)
 pbar = tqdm(range(num_steps))
@@ -155,22 +155,22 @@ for step in pbar:
     (params, buffers), energy = chain[-1]
     proposal_std_ = schedule(step=step, min=0.001, max=0.01)
     grad, _ = torch.func.grad_and_value(
-        lambda p, b, x, y: torch.sum(vmap_energy(p, b, x, y)),
-        argnums=(0,),
-    )(params.to_dict(), buffers.to_dict(), x, y)
+        lambda model, p, b, x, y: torch.sum(vmap_energy(model, p, b, x, y)),
+        argnums=(1,),
+    )(probmodel.train(), params.to_dict(), buffers.to_dict(), x, y)
     grad = TensorDict(grad[0])  # .apply(lambda x: torch.clip(x, min=-1.0, max=1.0))
     proposal_params = params.clone().apply(
         lambda x, grad: x
         - proposal_std_ * grad
-        + torch.randn_like(x) * (2 * proposal_std_ * 0.01) ** 0.5,
+        + 0.1 * torch.randn_like(x) * (2 * proposal_std_ ) ** 0.5,
         grad,
     )
-    proposal_energy = vmap_energy(params.to_dict(), buffers.to_dict(), x, y)
+    proposal_energy = vmap_energy(probmodel.eval(), params.to_dict(), buffers.to_dict(), x, y)
     accept: torch.Tensor = MH(energy, proposal_energy)
     new_params = params.apply(
         lambda state_, proposal_state_: torch.where(
             accept[(...,) + (None,) * (state_.dim() - 2)], proposal_state_, state_
-        ),
+        ), # use vmap?
         proposal_params,
     )
     chain = [((TensorDict(new_params), TensorDict(buffers)), proposal_energy)]
