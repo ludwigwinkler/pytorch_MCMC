@@ -142,7 +142,7 @@ plot_uncertainty(params, buffers)
 # %%
 
 proposal_std = 0.1
-chain = [((TensorDict(params), TensorDict(buffers)), init_energy)]
+chain = [((TensorDict(params, batch_size=num_chains), TensorDict(buffers,batch_size=num_chains)), init_energy)]
 
 
 num_steps = [100, 500, 2000][2]
@@ -158,7 +158,7 @@ for step in pbar:
         lambda model, p, b, x, y: torch.sum(vmap_energy(model, p, b, x, y)),
         argnums=(1,),
     )(probmodel.train(), params.to_dict(), buffers.to_dict(), x, y)
-    grad = TensorDict(grad[0])  # .apply(lambda x: torch.clip(x, min=-1.0, max=1.0))
+    grad = TensorDict(grad[0], batch_size=num_chains)  # .apply(lambda x: torch.clip(x, min=-1.0, max=1.0))
     proposal_params = params.clone().apply(
         lambda x, grad: x
         - proposal_std_ * grad
@@ -167,12 +167,23 @@ for step in pbar:
     )
     proposal_energy = vmap_energy(probmodel.eval(), params.to_dict(), buffers.to_dict(), x, y)
     accept: torch.Tensor = MH(energy, proposal_energy)
-    new_params = params.apply(
-        lambda state_, proposal_state_: torch.where(
-            accept[(...,) + (None,) * (state_.dim() - 2)], proposal_state_, state_
-        ), # use vmap?
-        proposal_params,
-    )
+    # new_params = params.apply(
+    #     lambda state_, proposal_state_: torch.where(
+    #         accept[(...,) + (None,) * (state_.dim() - 2)], proposal_state_, state_
+    #     ), # use vmap?
+    #     proposal_params,
+    # )
+    proposal_params.auto_batch_size_(1)
+    params.auto_batch_size_(1)
+    
+    next_params = []
+    for accept_, p_, p in zip(accept, proposal_params.chunk(num_chains, dim=0), params.chunk(num_chains, dim=0)):
+        next_params.append(p_) if accept_.item() else next_params.append(p)
+    new_params = torch.cat(next_params, dim=0)
+            
+    # new_params = torch.concat([p_ for accept, p_, p in zip(accept, new_params.chunk(num_chains, dim=0), params.chunk(num_chains, dim=0)) if accept.item() else p], dim=0)
+    
+    
     chain = [((TensorDict(new_params), TensorDict(buffers)), proposal_energy)]
     accept_ratio = accept.sum() / accept.numel()
     accept_ema(accept_ratio.item())
