@@ -253,9 +253,9 @@ print(f"Z_binned: {Z_binned}")
 #     torch.tensor(len(samples), dtype=torch.float32)
 # )
 
-Z_est = torch.exp(log_weights).sum() / len(samples)
+
 print(
-    f"Estimated partition function Z_t: {Z_est.item()} vs {compute_partition_function_1d(energy_t, -4, 4)}"
+    f"Estimated partition function Z_t: {Z_binned.item()} vs {compute_partition_function_1d(energy_t, -4, 4)}"
 )
 
 _ = plt.hist(

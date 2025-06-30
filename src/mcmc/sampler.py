@@ -1,6 +1,17 @@
+from turtle import st
+from typing import Callable
+import copy
 import torch
-
+import functools
+from torch import Tensor
+from tqdm import tqdm
+from dataclasses import dataclass
 from tensordict import TensorDict
+from mcmc.utils import EMA
+from mcmc.utils import RepeatedCosineSchedule
+
+from typing import Tuple, List
+
 
 __all__ = ["MetropolisHastingsAcceptance"]
 
@@ -21,9 +32,181 @@ class MetropolisHastingsAcceptance(torch.nn.Module):
         assert energy.shape == proposal_energy.shape, (
             f"{energy.shape=} != {proposal_energy.shape=}"
         )
-        log_ratio = proposal_energy - energy
+        log_ratio = -proposal_energy + energy
         log_ratio = torch.min(log_ratio, torch.zeros_like(log_ratio))  # log(1) = 0
         log_u = torch.zeros_like(log_ratio).uniform_(0, 1).log()
         log_accept = torch.gt(log_ratio, log_u)
 
         return log_accept
+
+
+@dataclass
+class Sampler(torch.nn.Module):
+    """
+    Base class for MCMC samplers.
+    """
+
+    def proposal_step(
+        self, sample: TensorDict, energy_fn: Callable, proposal_fn: Callable
+    ) -> Tuple[TensorDict, TensorDict]:
+        """
+        Perform a proposal step for the sampler.
+
+        Args:
+            sample (TensorDict): Current sample.
+            energy (Callable): Energy function to evaluate the proposal.
+
+        Returns:
+            Tuple[TensorDict, TensorDict]: Proposed sample and its energy.
+        """
+        raise NotImplementedError
+
+    def __call__(
+        self,
+        sample: TensorDict,
+        energy_fn: Callable,
+        burn_in: int = 100,
+        steps: int = 1000,
+        verbose: bool = True,
+    ):
+        assert hasattr(energy_fn, "__wrapped__"), (
+            "energy_fn must be wrapped with torch.func.vmap for vectorized evaluation."
+        )
+        accept_ema = EMA(ema_weight=0.99)
+        if verbose:
+            pbar = tqdm(range(steps))
+        else:
+            pbar = range(steps)
+        sample = sample
+        energy = energy_fn(sample)
+
+        MH_acceptance = MetropolisHastingsAcceptance()
+        chain = []
+
+        for step in pbar:
+            proposal_sample, proposal_energy, metrics = self.proposal_step(
+                sample, energy_fn, step=step
+            )  # TensorDict, TensorDict
+            accept: Tensor = MH_acceptance(energy, proposal_energy)
+            proposal_sample.auto_batch_size_(1)
+            sample.auto_batch_size_(1)
+            num_chains = proposal_sample.batch_size[0]
+            new_sample: List[TensorDict] = []
+            new_energy = []
+            for accept_, s_, s, e_, e in zip(
+                accept,
+                proposal_sample.chunk(num_chains, dim=0),
+                sample.chunk(num_chains, dim=0),
+                proposal_energy,
+                energy,
+            ):
+                new_sample.append(s_) if accept_.item() else new_sample.append(s)
+                new_energy.append(e_) if accept_.item() else new_energy.append(e)
+            sample: TensorDict = torch.cat(new_sample, dim=0)  # type: ignore
+            energy = torch.stack(new_energy, dim=0)
+
+            if step >= burn_in:
+                chain += [
+                    (
+                        copy.deepcopy(sample),
+                        copy.deepcopy(energy),
+                    )
+                ]
+                if len(chain) > 250:  # ring buffer
+                    chain.pop(0)
+
+            # Running Average of Acceptance Ratio
+            accept_ratio = accept.sum() / accept.numel()
+            accept_ema(accept_ratio.detach().item())
+
+            if verbose:
+                print_str = {
+                    "Accept": f"{accept_ema.val:.3f} Mean: {sample['x'].mean():.3f} Std: {sample['x'].std():.3f}"
+                }
+                for key, value in metrics.items():
+                    print_str["Accept"] += f" {key}: {value:.3f}"
+                pbar.set_postfix(print_str)
+        samples = [s for s, e in chain]
+        samples = torch.cat(samples, dim=0)
+        return samples, energy_fn(samples)
+
+
+@dataclass
+class ImportanceSampler(Sampler):
+    def __call__(
+        self,
+        energy_fn: Callable,
+        proposal_distribution: torch.distributions.Distribution,
+        samples: int = 10_000,
+    ):
+        metrics = {}
+
+        samples = proposal_distribution.sample((samples,))
+        log_prob = proposal_distribution.log_prob(samples)
+
+        log_weights = -energy_fn(samples) - log_prob
+        # Use log-sum-exp trick for numerical stability
+        max_logw = torch.max(log_weights)
+        Z_est = torch.exp(max_logw) * torch.mean(torch.exp(log_weights - max_logw))
+
+        return samples, energy_fn(samples), Z_est
+
+
+@dataclass
+class MHSampler(Sampler):
+    std: float = 0.1
+    proposal_fn: Callable = lambda x, std: x + torch.randn_like(x) * std
+    schedule: Callable | None = None
+
+    def proposal_step(
+        self,
+        sample: TensorDict,
+        energy_fn: Callable,
+        step: int | None = None,
+    ):
+        std = self.std if self.schedule is None else self.schedule(step=step)
+        metrics = {"std": std}
+        proposal_fn = functools.partial(self.proposal_fn, std=std)
+        proposal_state = sample.apply(proposal_fn)
+        proposal_energy = energy_fn(proposal_state)
+        return proposal_state, proposal_energy, metrics
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}(std={self.std}, "
+            f"proposal_fn={self.proposal_fn.__name__})"
+        )
+
+
+@dataclass
+class SGLD(Sampler):
+    step_size: float = 0.1
+    dampening: float = 0.001
+    step_size_schedule: Callable | None = None
+    dampening_schedule: Callable | None = None
+
+    def proposal_step(
+        self, sample: TensorDict, energy_fn: Callable, step: int | None = None
+    ):
+        metrics = {}
+        step_size = (
+            self.step_size
+            if self.step_size_schedule is None
+            else self.step_size_schedule(step=step)
+        )
+        with torch.enable_grad():
+            grad, energy_ = torch.func.grad_and_value(
+                energy_fn, sample.to_dict(), argnums=(0,)
+            )
+            energy_.detach()
+            grad = TensorDict(grad[0], batch_size=sample.batch_size).detach()
+
+        proposal_state = sample.apply(
+            lambda x, grad: x
+            - self.step_size * grad
+            + torch.randn_like(x) * (2 * self.step_size) ** 0.5 * self.dampening,
+            grad,
+        )
+        with torch.no_grad():
+            proposal_energy = energy_fn(proposal_state)
+        return proposal_state, proposal_energy, metrics

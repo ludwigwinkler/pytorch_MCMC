@@ -1,11 +1,56 @@
+from abc import abstractmethod
 import torch
 import einops
 
 __all__ = ["GaussianMixture1D", "GaussianMixture2D"]
 
 
-class GaussianMixture1D:
-    def __init__(self, means, stds, weights):
+class Energy(torch.nn.Module):
+    @abstractmethod
+    def energy(self, **kwargs):
+        """
+        Compute the energy of the model at point x.
+        """
+        raise NotImplementedError("Subclasses should implement this method.")
+
+
+class Gaussian1D(Energy):
+    def __init__(self, mean=0.0, std=1.0):
+        super().__init__()
+        self.mean = torch.tensor(mean, dtype=torch.float32)
+        self.std = torch.tensor(std, dtype=torch.float32)
+
+    def sample(self, num_samples=1):
+        return torch.normal(self.mean, self.std, size=(num_samples,))
+
+    def prob(self, x):
+        return (
+            1
+            / (self.std * torch.sqrt(2 * torch.tensor(torch.pi)))
+            * torch.exp(-0.5 * ((x - self.mean) / self.std) ** 2)
+        )
+
+    def log_prob(self, x):
+        return 0.5 * ((x - self.mean) / self.std) ** 2
+
+    @property
+    def Z(self):
+        # Normalization constant for the Gaussian distribution
+        return self.std * torch.sqrt(2 * torch.tensor(torch.pi))
+
+    def energy(self, x):
+        # Negative log probability (up to constant)
+        return 0.5 * ((x - self.mean) / self.std) ** 2
+
+
+class GaussianMixture1D(Energy):
+    def __init__(
+        self,
+        means=[-3.0, 0.0, 3.0],
+        stds=[0.5, 0.5, 0.5],
+        weights=[2, 0.3, 0.1],
+    ):
+        super().__init__()
         self.means = torch.tensor(means, dtype=torch.float32)
         self.stds = torch.tensor(stds, dtype=torch.float32)
         self.weights = torch.tensor(weights, dtype=torch.float32)
@@ -37,10 +82,6 @@ class GaussianMixture1D:
 
     def energy(self, x):
         # Negative log probability (up to constant)
-        return self.log_prob(x) + 1
-
-    def neg_energy(self, x):
-        # Negative log probability (up to constant)
         return -self.log_prob(x) + 1
 
 
@@ -52,8 +93,9 @@ covs_2d = einops.repeat(
 weights_2d = torch.tensor([0.5, 0.5, 0.25, 0.75])
 
 
-class GaussianMixture2D:
+class GaussianMixture2D(Energy):
     def __init__(self, means=means_2d, covs=covs_2d, weights=weights_2d):
+        super().__init__()
         assert type(means) == type(covs) == type(weights) == torch.Tensor, (
             f"{type(means)=} {type(covs)=} {type(weights)=}"
         )
@@ -97,6 +139,3 @@ class GaussianMixture2D:
 
     def energy(self, x):
         return self.log_prob(x) + 1
-
-    # def neg_energy(self, x):
-    #     return -self.log_prob(x) + 1

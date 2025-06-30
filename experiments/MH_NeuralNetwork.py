@@ -6,13 +6,19 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from numbers import Number
+from memory_profiler import profile
 
 from mcmc.sampler import MetropolisHastingsAcceptance
-from mcmc.energy import GaussianMixture1D, GaussianMixture2D
+from mcmc.energy import Energy, GaussianMixture1D, GaussianMixture2D
 from mcmc.utils import EMA, RepeatedCosineSchedule
 from mcmc.data import generate_nonstationary_data, generate_multimodal_linear_regression
 
 from torch.nn import Sequential, Linear, ReLU, Tanh, BatchNorm1d
+
+import os
+import psutil
+
+process = psutil.Process(os.getpid())
 
 plt.style.use("default")
 plt.rcParams["axes.facecolor"] = "white"
@@ -36,7 +42,7 @@ x, y = generate_nonstationary_data(
 )
 
 
-class ProbModel(torch.nn.Module):
+class ProbModel(Energy):
     def __init__(self, model):
         super().__init__()
         self.model = model
@@ -80,7 +86,7 @@ nn = torch.nn.Sequential(
 )
 
 probmodel = ProbModel(nn)
-probmodel.pretrain(x, y, num_steps=100, lr=1e-3)
+# probmodel.pretrain(x, y, num_steps=100, lr=1e-3)
 
 
 models = [copy.deepcopy(probmodel) for _ in range(num_chains)]
@@ -98,7 +104,9 @@ def single_energy(prob_model, params, buffers, data, target):
     return energy
 
 
-vmap_energy = torch.vmap(single_energy, (None, 0, 0, None, None), randomness="different")
+vmap_energy = torch.vmap(
+    single_energy, (None, 0, 0, None, None), randomness="different"
+)
 init_energy = vmap_energy(probmodel.eval(), params, buffers, x, y)
 
 # %%
@@ -136,59 +144,78 @@ def plot_uncertainty(params, buffers, str=""):
     plt.show()
 
 
-plot_uncertainty(params, buffers)
+# plot_uncertainty(params, buffers)
 
 
 # %%
+# Sampling
 
-proposal_std = 0.1
-chain = [((TensorDict(params, batch_size=num_chains), TensorDict(buffers,batch_size=num_chains)), init_energy)]
+proposal_std = 0.001
 
+chain = [
+    (
+        (
+            TensorDict(params, batch_size=num_chains),
+            TensorDict(buffers, batch_size=num_chains),
+        ),
+        init_energy,
+    )
+]
 
-num_steps = [100, 500, 2000][2]
+num_steps = [100, 1000, 10000][1]
 accept_ema = EMA(ema_weight=0.99)
 energy_ema = EMA(ema_weight=0.9)
 pbar = tqdm(range(num_steps))
-schedule = RepeatedCosineSchedule(steps=num_steps // 2, cycles=1)
+# pbar = range(num_steps)
+schedule = RepeatedCosineSchedule(steps=num_steps // 2, cycles=1, min=0.001, max=0.01)
 MH = MetropolisHastingsAcceptance()
+
 for step in pbar:
     (params, buffers), energy = chain[-1]
-    proposal_std_ = schedule(step=step, min=0.001, max=0.01)
-    grad, _ = torch.func.grad_and_value(
-        lambda model, p, b, x, y: torch.sum(vmap_energy(model, p, b, x, y)),
-        argnums=(1,),
-    )(probmodel.train(), params.to_dict(), buffers.to_dict(), x, y)
-    grad = TensorDict(grad[0], batch_size=num_chains)  # .apply(lambda x: torch.clip(x, min=-1.0, max=1.0))
-    proposal_params = params.clone().apply(
+
+    proposal_std_ = schedule(step=step)
+
+    # Compute new parameters
+    with torch.enable_grad():
+        grad, energy_ = torch.func.grad_and_value(
+            lambda model, p, b, x, y: torch.sum(vmap_energy(model, p, b, x, y)),
+            argnums=(1,),
+        )(probmodel.train(), params.to_dict(), buffers.to_dict(), x, y)
+        energy_.detach()
+        grad = TensorDict(grad[0], batch_size=num_chains).detach()
+    proposal_params = copy.deepcopy(params).apply(
         lambda x, grad: x
         - proposal_std_ * grad
-        + 0.1 * torch.randn_like(x) * (2 * proposal_std_ ) ** 0.5,
+        + 0.1 * torch.randn_like(x) * (2 * proposal_std_) ** 0.5,
         grad,
     )
-    proposal_energy = vmap_energy(probmodel.eval(), params.to_dict(), buffers.to_dict(), x, y)
-    accept: torch.Tensor = MH(energy, proposal_energy)
-    # new_params = params.apply(
-    #     lambda state_, proposal_state_: torch.where(
-    #         accept[(...,) + (None,) * (state_.dim() - 2)], proposal_state_, state_
-    #     ), # use vmap?
-    #     proposal_params,
-    # )
+    # Evaluate proposal energies
+    with torch.no_grad():
+        proposal_energy = vmap_energy(
+            probmodel.eval(), params.to_dict(), buffers.to_dict(), x, y
+        ).detach()
+    accept: torch.Tensor = MH(energy, proposal_energy).detach()
+
+    # Update parameters based on acceptance
     proposal_params.auto_batch_size_(1)
     params.auto_batch_size_(1)
-    
     next_params = []
-    for accept_, p_, p in zip(accept, proposal_params.chunk(num_chains, dim=0), params.chunk(num_chains, dim=0)):
+    for accept_, p_, p in zip(
+        accept,
+        proposal_params.chunk(num_chains, dim=0),
+        params.chunk(num_chains, dim=0),
+    ):
         next_params.append(p_) if accept_.item() else next_params.append(p)
     new_params = torch.cat(next_params, dim=0)
-            
+
     # new_params = torch.concat([p_ for accept, p_, p in zip(accept, new_params.chunk(num_chains, dim=0), params.chunk(num_chains, dim=0)) if accept.item() else p], dim=0)
-    
-    
+
     chain = [((TensorDict(new_params), TensorDict(buffers)), proposal_energy)]
     accept_ratio = accept.sum() / accept.numel()
-    accept_ema(accept_ratio.item())
-    energy_ema(energy.mean().item())
-    del grad
+    accept_ema(accept_ratio.detach().item())
+    energy_ema(energy.mean().detach().item())
+    # del grad, next_params, proposal_params, proposal_energy, accept, buffers, params, energy
+
     pbar.set_postfix(
         {
             "Accept": f"{accept_ema.val:.3f}",
@@ -196,9 +223,9 @@ for step in pbar:
             "Energy": f"{energy_ema.val:.3f}",
         }
     )
+
     if step % (num_steps // 5) == 0 or step == num_steps - 1:
         plot_uncertainty(new_params.to_dict(), buffers.to_dict(), str=f"Step {step}")
         # plt.savefig(f"MH_NeuralNetwork_step_{step}.png", dpi=300)
-        # plt.close()
-
-# %%
+        plt.close()
+        # plot_uncertainty(new_params.to_dict(), buffers.to_dict(), str=f"Step {step}")
