@@ -9,8 +9,8 @@ from numbers import Number
 # import mcmc.sampler.MetropolisHastingAcceptance
 # from mcmc.sampler import MetropolisHastingAcceptance
 
-from mcmc.sampler import MHSampler
-from mcmc.energy import GaussianMixture1D, GaussianMixture2D
+from mcmc.sampler import MHSampler, MALASampler, SGLDSampler
+from mcmc.energy import Gaussian1D, GaussianMixture1D, GaussianMixture2D
 from mcmc.utils import EMA
 
 plt.style.use("default")
@@ -42,21 +42,24 @@ plt.rcParams["legend.facecolor"] = "white"
 # plt.show()
 
 # %%
-Energy = GaussianMixture1D()
+# Energy = GaussianMixture1D()
+Energy = Gaussian1D(mean=-1.5, std=0.75)
 
 data = Energy.sample(50_000)
 
 # Create initial sample: batch of 100 chains, each with 1D x
 num_chains = 500
 num_steps = 1000
-x_init = torch.randn(num_chains, 1) * 3
+x_init = torch.randn(num_chains, 1) * 0.1
 init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
 
 # Vectorize the energy function using torch.func.vmap
 energy_fn = torch.vmap(lambda td: Energy.energy(td["x"]), in_dims=(0,))
 
 # Run the sampler for a small number of steps
-Sampler = MHSampler(std=1.0)
+# Sampler = MALASampler(step_size=0.01, dampening=1.0)
+# Sampler = SGLDSampler(step_size=0.01, dampening=1.0)
+Sampler = MHSampler(std=2.0)
 samples, energy = Sampler(
     sample=init_sample, energy_fn=energy_fn, steps=num_steps, verbose=True
 )

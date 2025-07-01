@@ -1,0 +1,13 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+This is a Markov Chain Monte Carlo project which is built around functional methods from pytorch's torch.func.
+You should pay extra attention to the math of MCMC samplers.
+
+There is a heavy emphasis on using elegant abstractions, functional calls and concise code through dataclasses and other modern Python best practices.
+
+- Whenever you add new functionality, be sure to write a test for it.
+- The baseline test is to run a new sampler on the Energy functions in mcmc.energy.
+- Before you add new code please explain to me why you write, and how it integrates into the code base

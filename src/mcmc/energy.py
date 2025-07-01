@@ -30,8 +30,8 @@ class Gaussian1D(Energy):
             * torch.exp(-0.5 * ((x - self.mean) / self.std) ** 2)
         )
 
-    def log_prob(self, x):
-        return 0.5 * ((x - self.mean) / self.std) ** 2
+    # def log_prob(self, x):
+    # return 0.5 * ((x - self.mean) / self.std) ** 2
 
     @property
     def Z(self):
@@ -46,9 +46,9 @@ class Gaussian1D(Energy):
 class GaussianMixture1D(Energy):
     def __init__(
         self,
-        means=[-3.0, 0.0, 3.0],
-        stds=[0.5, 0.5, 0.5],
-        weights=[2, 0.3, 0.1],
+        means=[-2.0, -0.5, 1.5],
+        stds=[0.25, 0.25, 0.25],
+        weights=[0.5, 0.3, 0.1],
     ):
         super().__init__()
         self.means = torch.tensor(means, dtype=torch.float32)
@@ -82,7 +82,7 @@ class GaussianMixture1D(Energy):
 
     def energy(self, x):
         # Negative log probability (up to constant)
-        return -self.log_prob(x) + 1
+        return -self.log_prob(x)
 
 
 means_2d = torch.tensor([[-2, -2], [-2, 2], [2, 2], [2, -2]], dtype=torch.float32)
