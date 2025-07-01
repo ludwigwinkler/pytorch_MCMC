@@ -1,11 +1,11 @@
 from turtle import st
-from typing import Callable
+from typing import Callable, Optional
 import copy
 import torch
 import functools
 from torch import Tensor
 from tqdm import tqdm
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from tensordict import TensorDict
 from mcmc.utils import EMA
 from mcmc.utils import RepeatedCosineSchedule
@@ -16,34 +16,36 @@ from typing import Tuple, List
 __all__ = ["MHSampler", "MALASampler", "ImportanceSampler"]
 
 
-class MetropolisHastingsAcceptance(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(
-        self, energy, proposal_energy, forward_proposal=None, reverse_proposal=None
-    ):
-        """
-        a(x' | x)   = min( 1, exp(-Energy(x'))/exp(-E(x)))
-                    = min( 1, exp(-Energy(x') - -E(x)))
-
-        All calculations done in log space for numerical precision
-
-        """
-        assert energy.shape[-1] == 1, f"{energy.shape=}"
-        assert energy.shape == proposal_energy.shape, (
-            f"{energy.shape=} != {proposal_energy.shape=}"
-        )
-        log_ratio = -proposal_energy + energy
-        log_ratio = torch.min(log_ratio, torch.zeros_like(log_ratio))  # log(1) = 0
-        log_u = torch.zeros_like(log_ratio).uniform_(0, 1).log()
-        log_accept = torch.gt(log_ratio, log_u)
-
-        return log_accept
+def MetropolisHastingsAcceptance(
+    energy,
+    proposal_energy,
+    forward_log_prob=None,
+    reverse_log_prob=None,
+    asymmetric=False,
+):
+    """
+    Metropolis-Hastings acceptance function (stateless).
+    Args:
+        energy: Current energy.
+        proposal_energy: Proposed energy.
+        forward_log_prob: Log-probability of forward transition (for asymmetric proposals).
+        reverse_log_prob: Log-probability of reverse transition (for asymmetric proposals).
+        asymmetric: Whether to use asymmetric acceptance (e.g., for MALA).
+    Returns:
+        accept: Boolean tensor indicating acceptance.
+    """
+    assert energy.shape == proposal_energy.shape
+    log_ratio = -proposal_energy + energy
+    if asymmetric and forward_log_prob is not None and reverse_log_prob is not None:
+        log_ratio = log_ratio + reverse_log_prob - forward_log_prob
+    log_ratio = torch.minimum(log_ratio, torch.zeros_like(log_ratio))
+    log_u = torch.log(torch.rand_like(log_ratio))  # log U(0,1)
+    accept = log_ratio > log_u
+    return accept
 
 
 @dataclass
-class Sampler(torch.nn.Module):
+class Sampler:
     """
     Base class for MCMC samplers.
     """
@@ -53,17 +55,7 @@ class Sampler(torch.nn.Module):
         sample: TensorDict,
         energy_fn: Callable,
         step: int | None = None,
-    ) -> Tuple[TensorDict, TensorDict]:
-        """
-        Perform a proposal step for the sampler.
-
-        Args:
-            sample (TensorDict): Current sample.
-            energy (Callable): Energy function to evaluate the proposal.
-
-        Returns:
-            Tuple[TensorDict, TensorDict]: Proposed sample and its energy.
-        """
+    ) -> dict:
         raise NotImplementedError
 
     def __call__(
@@ -78,51 +70,40 @@ class Sampler(torch.nn.Module):
             "energy_fn must be wrapped with torch.func.vmap for vectorized evaluation."
         )
         accept_ema = EMA(ema_weight=0.99)
-        if verbose:
-            pbar = tqdm(range(steps))
-        else:
-            pbar = range(steps)
-        sample = sample
+        pbar = tqdm(range(steps)) if verbose else range(steps)
         energy = energy_fn(sample)
-
         chain = []
-
         for step in pbar:
-            proposal_dict, metrics = self.proposal_step(
+            proposal_dict = self.proposal_step(
                 sample=sample, energy_fn=energy_fn, step=step
             )
+            proposal_sample = proposal_dict["proposal_sample"]
+            proposal_energy = proposal_dict["proposal_energy"]
+            energy = proposal_dict["energy"]
+            forward_log_prob = proposal_dict["forward_transition_log_prob"]
+            backward_log_prob = proposal_dict["backward_transition_log_prob"]
+            metrics = proposal_dict.get("metrics", {})
 
-            if hasattr(self, "MH_Acceptance"):
-                accept: Tensor = self.MH_Acceptance(
-                    energy, proposal_dict["proposal_energy"]
-                )
-                accept_ratio = accept.sum() / accept.numel()
-                sample, energy = self.accept_proposal(
-                    sample,
-                    proposal_dict["proposal_sample"],
-                    energy,
-                    proposal_dict["proposal_energy"],
-                    accept,
-                )  # filters according to accept
-            else:
-                accept_ratio = torch.scalar_tensor(1.0)
-                sample = proposal_sample
-                energy = proposal_energy
-
+            accept = MetropolisHastingsAcceptance(
+                energy,
+                proposal_energy,
+                forward_log_prob,
+                backward_log_prob,
+                getattr(self, "asymmetric", False),
+            )
+            accept_ratio = accept.float().mean()
+            sample, energy = self.accept_proposal(
+                sample,
+                proposal_sample,
+                energy,
+                proposal_energy,
+                accept,
+            )
             if step >= burn_in:
-                chain += [
-                    (
-                        copy.deepcopy(sample),
-                        copy.deepcopy(energy),
-                    )
-                ]
-                if len(chain) > 250:  # ring buffer
+                chain.append((copy.deepcopy(sample), copy.deepcopy(energy)))
+                if len(chain) > 250:
                     chain.pop(0)
-
-            # Running Average of Acceptance Ratio
-
             accept_ema(accept_ratio.detach().item())
-
             if verbose:
                 print_str = {
                     "Accept": f"{accept_ema.val:.3f} Mean: {sample['x'].mean():.3f} Std: {sample['x'].std():.3f}"
@@ -149,7 +130,7 @@ class Sampler(torch.nn.Module):
         proposal_sample.auto_batch_size_(1)
         sample.auto_batch_size_(1)
         num_chains = proposal_sample.batch_size[0]
-        new_sample: List[TensorDict] = []
+        new_sample: list = []
         new_energy = []
         for accept_, s_, s, e_, e in zip(
             accept,
@@ -160,7 +141,7 @@ class Sampler(torch.nn.Module):
         ):
             new_sample.append(s_) if accept_.item() else new_sample.append(s)
             new_energy.append(e_) if accept_.item() else new_energy.append(e)
-        sample: TensorDict = torch.cat(new_sample, dim=0)  # type: ignore
+        sample = torch.cat(new_sample, dim=0)
         energy = torch.stack(new_energy, dim=0)
         return sample, energy
 
@@ -190,23 +171,27 @@ class ImportanceSampler:
 class MHSampler(Sampler):
     std: float = 0.1
     proposal_fn: Callable = lambda x, std: x + torch.randn_like(x) * std
-    schedule: Callable | None = None
-    MH_Acceptance = MetropolisHastingsAcceptance()
+    schedule: Optional[Callable] = None
+    asymmetric: bool = False
 
     def proposal_step(
         self,
         sample: TensorDict,
         energy_fn: Callable,
         step: int | None = None,
-    ):
+    ) -> dict:
         std = self.std if self.schedule is None else self.schedule(step=step)
         metrics = {"std": std}
         proposal_fn = functools.partial(self.proposal_fn, std=std)
         proposal_state = sample.apply(proposal_fn)
         proposal_energy = energy_fn(proposal_state)
+        energy = energy_fn(sample)
         return {
+            "energy": energy,
             "proposal_sample": proposal_state,
             "proposal_energy": proposal_energy,
+            "forward_transition_log_prob": None,
+            "backward_transition_log_prob": None,
             "metrics": metrics,
         }
 
@@ -221,12 +206,13 @@ class MHSampler(Sampler):
 class SGLDSampler(Sampler):
     step_size: float = 0.01
     dampening: float = 1.0
-    step_size_schedule: Callable | None = None
-    dampening_schedule: Callable | None = None
+    step_size_schedule: Optional[Callable] = None
+    dampening_schedule: Optional[Callable] = None
+    asymmetric: bool = False
 
     def proposal_step(
         self, sample: TensorDict, energy_fn: Callable, step: int | None = None
-    ):
+    ) -> dict:
         metrics = {}
         step_size = (
             self.step_size
@@ -244,51 +230,36 @@ class SGLDSampler(Sampler):
             )(sample.to_dict())
             energy_.detach()
             grad = TensorDict(grad[0], batch_size=sample.batch_size).detach()
-
-        proposal_state = copy.deepcopy(sample).apply(
+        proposal_state = sample.apply(
             lambda x, grad: x
             - step_size * grad
-            + torch.randn_like(x) * (2 * step_size) ** 0.5,
+            + torch.randn_like(x) * (2 * step_size * dampening) ** 0.5,
             grad,
         )
         with torch.no_grad():
             proposal_energy = energy_fn(proposal_state)
-        return proposal_state, proposal_energy, metrics
+            energy = energy_fn(sample)
+        return {
+            "energy": energy,
+            "proposal_sample": proposal_state,
+            "proposal_energy": proposal_energy,
+            "forward_transition_log_prob": None,
+            "backward_transition_log_prob": None,
+            "metrics": metrics,
+        }
 
 
 @dataclass
-class MALASampler(SGLDSampler):
-    MH_Acceptance = MetropolisHastingsAcceptance()
-    # TODO: respect nonsymmetric proposal probability
-    '''
-    class MetropolisHastingsAcceptance(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, energy, proposal_energy, log_q_reverse, log_q_forward):
-        """
-        Computes Metropolis-Hastings acceptance for asymmetric proposal.
-
-        Args:
-            energy:           shape [batch, 1]  — E(x)
-            proposal_energy:  shape [batch, 1]  — E(x')
-            log_q_reverse:    log q(x | x')
-            log_q_forward:    log q(x' | x)
-
-        Returns:
-            accept_mask: shape [batch, 1], bool
-        """
-        assert energy.shape == proposal_energy.shape
-        log_ratio = -proposal_energy + energy + log_q_reverse - log_q_forward
-        log_ratio = torch.minimum(log_ratio, torch.zeros_like(log_ratio))
-        log_u = torch.log(torch.rand_like(log_ratio))  # log U(0,1)
-        accept = log_ratio > log_u
-        return accept
-    '''
+class MALASampler(Sampler):
+    step_size: float = 0.01
+    dampening: float = 1.0
+    step_size_schedule: Optional[Callable] = None
+    dampening_schedule: Optional[Callable] = None
+    asymmetric: bool = True
 
     def proposal_step(
         self, sample: TensorDict, energy_fn: Callable, step: int | None = None
-    ):
+    ) -> dict:
         metrics = {}
         step_size = (
             self.step_size
@@ -306,45 +277,40 @@ class MALASampler(SGLDSampler):
             )(sample.to_dict())
             energy_.detach()
             grad = TensorDict(grad[0], batch_size=sample.batch_size).detach()
-
-        """Calculate next stochastic sample"""
         proposal_sample = sample.apply(
             lambda x, grad: x
             - step_size * grad
-            + torch.randn_like(x) * (2 * step_size) ** 0.5,
+            + torch.randn_like(x) * (2 * step_size * dampening) ** 0.5,
             grad,
         )
         with torch.no_grad():
             proposal_energy = energy_fn(proposal_sample)
-
-        """Obtain the forward transition log probability"""
-        deterministic_forward_proposal = sample - step_size * grad
-        forward_transition_log_prob = (
-            -1
-            / (4 * step_size)
-            * ((proposal_sample - deterministic_forward_proposal) ** 2).sum(
-                dim=-1, keepdim=True
-            )
+            energy = energy_fn(sample)
+        # Forward transition log-probability
+        deterministic_forward = sample.apply(lambda x, grad: x - step_size * grad, grad)
+        squared_diffs_forward = proposal_sample.apply(
+            lambda x, y: ((x - y) ** 2).sum(dim=-1, keepdim=True), deterministic_forward
         )
-        """Obtain reverse transition log probability"""
+        forward_log_prob = -sum(squared_diffs_forward.values()) / (4 * step_size)
+        # Reverse transition log-probability
         with torch.enable_grad():
-            grad, energy_ = torch.func.grad_and_value(
+            grad_prop, _ = torch.func.grad_and_value(
                 lambda args: energy_fn(args).sum(), argnums=(0,)
             )(proposal_sample.to_dict())
-            energy_.detach()
-            grad = TensorDict(grad[0], batch_size=sample.batch_size).detach()
-        deterministic_backward_proposal = proposal_sample - step_size * grad
-        backward_transition_log_prob = (
-            -1
-            / (4 * step_size)
-            * ((sample - deterministic_backward_proposal) ** 2).sum(
-                dim=-1, keepdim=True
-            )
+            grad_prop = TensorDict(grad_prop[0], batch_size=sample.batch_size).detach()
+        deterministic_backward = proposal_sample.apply(
+            lambda x, grad: x - step_size * grad, grad_prop
         )
+        squared_diffs_backward = sample.apply(
+            lambda x, y: ((x - y) ** 2).sum(dim=-1, keepdim=True),
+            deterministic_backward,
+        )
+        backward_log_prob = -sum(squared_diffs_backward.values()) / (4 * step_size)
         return {
+            "energy": energy,
             "proposal_sample": proposal_sample,
             "proposal_energy": proposal_energy,
-            "forward_transition_log_prob": forward_transition_log_prob,
-            "backward_transition_log_prob": backward_transition_log_prob,
+            "forward_transition_log_prob": forward_log_prob,
+            "backward_transition_log_prob": backward_log_prob,
             "metrics": metrics,
         }
