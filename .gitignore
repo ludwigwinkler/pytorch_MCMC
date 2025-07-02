@@ -126,3 +126,21 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# GitHub Actions
+.github/workflows/*.log
+
+# Coverage reports
+coverage.xml
+htmlcov/
+.coverage*
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# PyTorch model files
+*.pth
+*.pt

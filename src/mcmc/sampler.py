@@ -1,4 +1,3 @@
-from turtle import st
 from typing import Callable, Optional
 import copy
 import torch

@@ -10,6 +10,7 @@ build-backend = "setuptools.build_meta"
 name = "mcmc"
 dynamic = ["version"]
 dependencies = [
+	"scipy",
 	"torch",
 	"matplotlib",
 	"einops",
