@@ -2,14 +2,11 @@ from typing import Callable, Optional
 import copy
 import torch
 import functools
-from torch import Tensor
+
 from tqdm import tqdm
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from tensordict import TensorDict
 from mcmc.utils import EMA
-from mcmc.utils import RepeatedCosineSchedule
-
-from typing import Tuple, List
 
 
 __all__ = ["MHSampler", "MALASampler", "ImportanceSampler"]
