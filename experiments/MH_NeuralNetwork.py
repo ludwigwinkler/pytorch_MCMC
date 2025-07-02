@@ -6,7 +6,6 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from numbers import Number
-from memory_profiler import profile
 
 from mcmc.sampler import MetropolisHastingsAcceptance
 from mcmc.energy import Energy, GaussianMixture1D, GaussianMixture2D

@@ -8,7 +8,6 @@ from tensordict import TensorDict
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from numbers import Number
-from memory_profiler import profile
 
 from mcmc.sampler import MALASampler, MetropolisHastingsAcceptance
 from mcmc.energy import Energy, GaussianMixture1D, GaussianMixture2D
@@ -18,9 +17,7 @@ from mcmc.data import generate_nonstationary_data, generate_multimodal_linear_re
 from torch.nn import Sequential, Linear, ReLU, Tanh, BatchNorm1d
 
 import os
-import psutil
 
-process = psutil.Process(os.getpid())
 
 plt.style.use("default")
 plt.rcParams["axes.facecolor"] = "white"
