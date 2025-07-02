@@ -183,6 +183,7 @@ class MHSampler(Sampler):
     ) -> dict:
         std = self.std if self.schedule is None else self.schedule(step=step)
         metrics = {"std": std}
+        # proposal function should be applied to 0 entry in sample TensorDict where things not being optimized should be wrapped in NonTensorData
         proposal_fn = functools.partial(self.proposal_fn, std=std)
         proposal_state = sample.apply(proposal_fn)
         proposal_energy = energy_fn(proposal_state)
@@ -225,6 +226,7 @@ class SGLDSampler(Sampler):
             if self.dampening_schedule is None
             else self.dampening_schedule(step=step)
         )
+        # proposal function should be applied to 0 entry in sample TensorDict where things not being optimized should be wrapped in NonTensorData
         with torch.enable_grad():
             grad, energy_ = torch.func.grad_and_value(
                 lambda args: energy_fn(args).sum(), argnums=(0,)
@@ -272,6 +274,7 @@ class MALASampler(Sampler):
             if self.dampening_schedule is None
             else self.dampening_schedule(step=step)
         )
+        # proposal function should be applied to 0 entry in sample TensorDict where things not being optimized should be wrapped in NonTensorData
         with torch.enable_grad():
             grad, energy_ = torch.func.grad_and_value(
                 lambda args: energy_fn(args).sum(), argnums=(0,)
