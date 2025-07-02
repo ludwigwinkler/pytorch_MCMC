@@ -65,6 +65,7 @@ jobs:
     - name: Install the project
       run: |
         uv tool install ruff@latest
+        uv tool install ty@latest
         uv sync --locked --all-extras --dev
 
     - name: Run ruff
