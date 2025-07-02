@@ -289,7 +289,7 @@ for step in pbar:
     )
 
     if step % (num_steps // 5) == 0 or step == num_steps - 1:
-        plot_uncertainty(new_params.to_dict(), buffers.to_dict(), title=f"Step {step}")
+        plot_uncertainty(new_params.to_dict(), buffers.to_dict(), title=f"Step {step}")  # type: ignore
         # plt.savefig(f"MH_NeuralNetwork_step_{step}.png", dpi=300)
         plt.close()
         # plot_uncertainty(new_params.to_dict(), buffers.to_dict(), str=f"Step {step}")
