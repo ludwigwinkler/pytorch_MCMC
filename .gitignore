@@ -136,6 +136,7 @@ htmlcov/
 .coverage*
 
 # VS Code
+.vscode
 .vscode/
 
 # macOS
