@@ -290,7 +290,8 @@ class MALASampler(Sampler):
         # Forward transition log-probability
         deterministic_forward = sample.apply(lambda x, grad: x - step_size * grad, grad)
         squared_diffs_forward = proposal_sample.apply(
-            lambda x, y: ((x - y) ** 2).sum(dim=-1, keepdim=True), deterministic_forward
+            lambda x, y: ((x - y) ** 2).sum(dim=-1, keepdim=True),
+            deterministic_forward,
         )
         forward_log_prob = -sum(squared_diffs_forward.values()) / (4 * step_size)
         # Reverse transition log-probability
