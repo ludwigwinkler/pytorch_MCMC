@@ -23,4 +23,5 @@
 #         # Assert close to true values
 #         assert abs(m_est - m_true) < 0.05, f"m: {m_est} vs {m_true}"
 #         assert abs(b_est - b_true) < 0.05, f"b: {b_est} vs {b_true}"
-#         assert abs(sigma_est - sigma_true) < 0.05, f"sigma: {sigma_est} vs {sigma_true}"
+#         assert abs(sigma_est - sigma_true) < 0.05, \
+# f"sigma: {sigma_est} vs {sigma_true}"

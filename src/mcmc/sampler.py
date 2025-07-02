@@ -2,14 +2,11 @@ from typing import Callable, Optional
 import copy
 import torch
 import functools
-from torch import Tensor
+
 from tqdm import tqdm
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from tensordict import TensorDict
 from mcmc.utils import EMA
-from mcmc.utils import RepeatedCosineSchedule
-
-from typing import Tuple, List
 
 
 __all__ = ["MHSampler", "MALASampler", "ImportanceSampler"]
@@ -33,9 +30,9 @@ def MetropolisHastingsAcceptance(
     Returns:
         accept: Boolean tensor indicating acceptance.
     """
-    assert energy.shape == proposal_energy.shape, (
-        f"Shape mismatch: {energy.shape} vs {proposal_energy.shape}"
-    )
+    assert (
+        energy.shape == proposal_energy.shape
+    ), f"Shape mismatch: {energy.shape} vs {proposal_energy.shape}"
     log_ratio = -proposal_energy + energy
     if asymmetric and forward_log_prob is not None and reverse_log_prob is not None:
         log_ratio = log_ratio + reverse_log_prob - forward_log_prob
@@ -67,9 +64,9 @@ class Sampler:
         steps: int = 1000,
         verbose: bool = True,
     ):
-        assert hasattr(energy_fn, "__wrapped__"), (
-            "energy_fn must be wrapped with torch.func.vmap for vectorized evaluation."
-        )
+        assert hasattr(
+            energy_fn, "__wrapped__"
+        ), "energy_fn must be wrapped with torch.func.vmap for vectorized evaluation."
         accept_ema = EMA(ema_weight=0.99)
         pbar = tqdm(range(steps)) if verbose else range(steps)
         energy = energy_fn(sample)
@@ -111,7 +108,7 @@ class Sampler:
                 }
                 for key, value in metrics.items():
                     print_str["Accept"] += f" {key}: {value:.3f}"
-                pbar.set_postfix(print_str)
+                pbar.set_postfix(print_str)  # type: ignore
         samples = [s for s, e in chain]
         samples = torch.cat(samples, dim=0)
         return samples, energy_fn(samples)
@@ -157,7 +154,7 @@ class ImportanceSampler:
     ):
         metrics = {}
 
-        samples = proposal_distribution.sample((samples,))
+        samples: torch.Tensor = proposal_distribution.sample((samples,))
         log_prob = proposal_distribution.log_prob(samples)
 
         log_weights = -energy_fn(samples) - log_prob
@@ -183,6 +180,7 @@ class MHSampler(Sampler):
     ) -> dict:
         std = self.std if self.schedule is None else self.schedule(step=step)
         metrics = {"std": std}
+        # proposal function should be applied to 0 entry in sample TensorDict where things not being optimized should be wrapped in NonTensorData
         proposal_fn = functools.partial(self.proposal_fn, std=std)
         proposal_state = sample.apply(proposal_fn)
         proposal_energy = energy_fn(proposal_state)
@@ -225,6 +223,7 @@ class SGLDSampler(Sampler):
             if self.dampening_schedule is None
             else self.dampening_schedule(step=step)
         )
+        # proposal function should be applied to 0 entry in sample TensorDict where things not being optimized should be wrapped in NonTensorData
         with torch.enable_grad():
             grad, energy_ = torch.func.grad_and_value(
                 lambda args: energy_fn(args).sum(), argnums=(0,)
@@ -272,6 +271,8 @@ class MALASampler(Sampler):
             if self.dampening_schedule is None
             else self.dampening_schedule(step=step)
         )
+        # proposal function should be applied to 0 entry in sample TensorDict where things
+        # not being optimized should be wrapped in NonTensorData
         with torch.enable_grad():
             grad, energy_ = torch.func.grad_and_value(
                 lambda args: energy_fn(args).sum(), argnums=(0,)
@@ -289,7 +290,7 @@ class MALASampler(Sampler):
             energy = energy_fn(sample)
         # Forward transition log-probability
         deterministic_forward = sample.apply(lambda x, grad: x - step_size * grad, grad)
-        squared_diffs_forward = proposal_sample.apply(
+        squared_diffs_forward = proposal_sample.apply(  # type: ignore
             lambda x, y: ((x - y) ** 2).sum(dim=-1, keepdim=True),
             deterministic_forward,
         )
@@ -298,7 +299,7 @@ class MALASampler(Sampler):
         with torch.enable_grad():
             grad_prop, _ = torch.func.grad_and_value(
                 lambda args: energy_fn(args).sum(), argnums=(0,)
-            )(proposal_sample.to_dict())
+            )(proposal_sample.to_dict())  # type: ignore
             grad_prop = TensorDict(grad_prop[0], batch_size=sample.batch_size).detach()
         deterministic_backward = proposal_sample.apply(
             lambda x, grad: x - step_size * grad, grad_prop

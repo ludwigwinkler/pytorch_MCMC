@@ -8,7 +8,6 @@ from tensordict import TensorDict
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from numbers import Number
-from memory_profiler import profile
 
 from mcmc.sampler import MALASampler, MetropolisHastingsAcceptance
 from mcmc.energy import Energy, GaussianMixture1D, GaussianMixture2D
@@ -18,9 +17,7 @@ from mcmc.data import generate_nonstationary_data, generate_multimodal_linear_re
 from torch.nn import Sequential, Linear, ReLU, Tanh, BatchNorm1d
 
 import os
-import psutil
 
-process = psutil.Process(os.getpid())
 
 plt.style.use("default")
 plt.rcParams["axes.facecolor"] = "white"
@@ -292,7 +289,7 @@ for step in pbar:
     )
 
     if step % (num_steps // 5) == 0 or step == num_steps - 1:
-        plot_uncertainty(new_params.to_dict(), buffers.to_dict(), title=f"Step {step}")
+        plot_uncertainty(new_params.to_dict(), buffers.to_dict(), title=f"Step {step}")  # type: ignore
         # plt.savefig(f"MH_NeuralNetwork_step_{step}.png", dpi=300)
         plt.close()
         # plot_uncertainty(new_params.to_dict(), buffers.to_dict(), str=f"Step {step}")

@@ -20,9 +20,13 @@ dependencies = [
 	"pytest-xdist",
 	"hydra-core",
 	"tensordict",
+	"ruff",
+	"pre-commit>=2.21.0",
+	"ty",
+	"seaborn"
 ]
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.11"
 
 [project.optional-dependencies]
 test = ["pytest"]
@@ -34,3 +38,10 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F"]
+ignore = ["F401", "E402", "E501", "E731"]
+
+[tool.ty.environment]
+python = "./.venv"

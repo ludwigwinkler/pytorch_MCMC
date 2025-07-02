@@ -71,6 +71,8 @@ samples, energy = Sampler(
 
 print(samples)
 
+# test
+
 # samples = [s for s, e in chain]
 # samples = torch.cat(samples, dim=0)
 

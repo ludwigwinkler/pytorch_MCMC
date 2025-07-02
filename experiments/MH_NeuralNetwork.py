@@ -6,7 +6,6 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from numbers import Number
-from memory_profiler import profile
 
 from mcmc.sampler import MetropolisHastingsAcceptance
 from mcmc.energy import Energy, GaussianMixture1D, GaussianMixture2D
@@ -201,14 +200,14 @@ for step in pbar:
     # Update parameters based on acceptance
     proposal_params.auto_batch_size_(1)
     params.auto_batch_size_(1)
-    next_params = []
+    next_params: list[TensorDict] = []
     for accept_, p_, p in zip(
         accept,
         proposal_params.chunk(num_chains, dim=0),
         params.chunk(num_chains, dim=0),
     ):
         next_params.append(p_) if accept_.item() else next_params.append(p)
-    new_params = torch.cat(next_params, dim=0)
+    new_params: TensorDict = torch.cat(next_params, dim=0)  # type: ignore
 
     # new_params = torch.concat([p_ for accept, p_, p in zip(accept, new_params.chunk(num_chains, dim=0), params.chunk(num_chains, dim=0)) if accept.item() else p], dim=0)
 
