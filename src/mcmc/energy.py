@@ -139,3 +139,28 @@ class GaussianMixture2D(Energy):
 
     def energy(self, x):
         return self.log_prob(x) + 1
+
+
+class LinearRegressionEnergy(Energy):
+    def __init__(self, m=1.0, b=-1, sigma=1.0):
+        super().__init__()
+        self.m = torch.tensor(m, dtype=torch.float32)
+        self.b = torch.tensor(b, dtype=torch.float32)
+        self.sigma = torch.tensor(sigma, dtype=torch.float32)
+
+    def sample(self, num_samples=100, x_range=(-5, 5)):
+        x = torch.empty(num_samples, 1).uniform_(*x_range)
+        noise = torch.randn(num_samples, 1) * self.sigma
+        y = self.m * x + self.b + noise
+        return x, y
+
+    def energy(self, x, y):
+        # Negative log-likelihood for Gaussian noise
+        pred = self.m * x + self.b
+        return 0.5 * ((y - pred) / self.sigma) ** 2
+
+    def log_prob(self, x, y):
+        pred = self.m * x + self.b
+        return -0.5 * ((y - pred) / self.sigma) ** 2 - torch.log(
+            self.sigma * torch.sqrt(2 * torch.tensor(torch.pi))
+        )

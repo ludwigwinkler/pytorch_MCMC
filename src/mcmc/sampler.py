@@ -34,7 +34,9 @@ def MetropolisHastingsAcceptance(
     Returns:
         accept: Boolean tensor indicating acceptance.
     """
-    assert energy.shape == proposal_energy.shape
+    assert energy.shape == proposal_energy.shape, (
+        f"Shape mismatch: {energy.shape} vs {proposal_energy.shape}"
+    )
     log_ratio = -proposal_energy + energy
     if asymmetric and forward_log_prob is not None and reverse_log_prob is not None:
         log_ratio = log_ratio + reverse_log_prob - forward_log_prob

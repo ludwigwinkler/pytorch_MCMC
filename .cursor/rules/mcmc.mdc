@@ -11,3 +11,8 @@ There is a heavy emphasis on using elegant abstractions, functional calls and co
 - Whenever you add new functionality, be sure to write a test for it.
 - The baseline test is to run a new sampler on the Energy functions in mcmc.energy.
 - Before you add new code please explain to me why you write, and how it integrates into the code base
+
+You should use the following methods predominantly:
+- pytorch
+- torch.func
+- tensordict package to obtain Tensorlike dictionaries

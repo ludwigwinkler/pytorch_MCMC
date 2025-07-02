@@ -42,22 +42,12 @@ init_samples = TensorDict(
     {"x": 0.5 + 0.5 * torch.randn((num_chains, 1)).clamp(-10, 10)},
     batch_size=num_chains,
 )
-# samples, energy = sampler(
-#     sample=init_samples, energy_fn=energy_fn, steps=num_steps, verbose=True
-# )
+samples, energy = sampler(
+    sample=init_samples, energy_fn=energy_fn, steps=num_steps, verbose=True
+)
 
 # %%
 
-proposal_distribution = torch.distributions.Normal(loc=0.0, scale=10.0)
-IS_energy_fn = Energy.energy
-sampler = ImportanceSampler()
-_, _, Z_est = sampler(
-    energy_fn=IS_energy_fn,
-    samples=10_000,
-    proposal_distribution=proposal_distribution,
-)
-
-print(f"Estimated Partition Function Z: {Z_est.item()} vs {Energy.Z.item()}")
 
 # %%
 
@@ -86,3 +76,16 @@ _ = plt.hist(
 plt.legend()
 plt.xlim(-5, 5)
 plt.ylim(0, 2)
+
+# %%
+
+proposal_distribution = torch.distributions.Normal(loc=0.0, scale=2.0)
+IS_energy_fn = Energy.energy
+IS = ImportanceSampler()
+_, _, Z_est, _ = IS(
+    energy_fn=IS_energy_fn,
+    samples=10_000,
+    proposal_distribution=proposal_distribution,
+)
+
+print(f"Estimated Partition Function Z: {Z_est.item()} vs {Energy.Z.item()}")
