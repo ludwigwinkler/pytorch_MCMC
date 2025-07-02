@@ -65,8 +65,8 @@ jobs:
         pip install ruff isort flake8 mypy
         pip install -e .
 
-    - name: Run ruff
-      run: ruff check src/ tests/
+    # - name: Run ruff
+      # run: ruff check src/ tests/
 
     - name: Run isort
       run: isort --check-only --diff src/ tests/

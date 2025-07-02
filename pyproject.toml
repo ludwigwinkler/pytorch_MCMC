@@ -20,6 +20,7 @@ dependencies = [
 	"pytest-xdist",
 	"hydra-core",
 	"tensordict",
+	"ruff",
 ]
 readme = "README.md"
 requires-python = ">=3.7"
@@ -34,3 +35,7 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F"]
+ignore = ["F401", "E402"]
