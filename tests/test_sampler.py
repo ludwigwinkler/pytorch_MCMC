@@ -70,7 +70,9 @@ class TestMHSampler:
         assert abs(sample_std - std) < 0.1
 
     def test_MH_gaussianmixture1d(self):
-        Energy = GaussianMixture1D(weights=torch.tensor([0.5, 0.25, 0.25]),means=torch.tensor([-2.5, -0.5, 0.5]),
+        Energy = GaussianMixture1D(
+            weights=torch.tensor([0.5, 0.25, 0.25]),
+            means=torch.tensor([-2.5, -0.5, 0.5]),
         )
 
         # Create initial sample: batch of 100 chains, each with 1D x
