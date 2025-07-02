@@ -271,7 +271,8 @@ class MALASampler(Sampler):
             if self.dampening_schedule is None
             else self.dampening_schedule(step=step)
         )
-        # proposal function should be applied to 0 entry in sample TensorDict where things not being optimized should be wrapped in NonTensorData
+        # proposal function should be applied to 0 entry in sample TensorDict where things
+        # not being optimized should be wrapped in NonTensorData
         with torch.enable_grad():
             grad, energy_ = torch.func.grad_and_value(
                 lambda args: energy_fn(args).sum(), argnums=(0,)

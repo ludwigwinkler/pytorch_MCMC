@@ -74,7 +74,6 @@ class TestMHSampler:
             weights=torch.tensor([0.5, 0.25, 0.25]),
             means=torch.tensor([-2.5, -0.5, 0.5]),
         )
-        data = Energy.sample(50_000)
 
         # Create initial sample: batch of 100 chains, each with 1D x
         num_chains = 500

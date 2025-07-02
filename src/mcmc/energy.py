@@ -96,7 +96,7 @@ weights_2d = torch.tensor([0.5, 0.5, 0.25, 0.75])
 class GaussianMixture2D(Energy):
     def __init__(self, means=means_2d, covs=covs_2d, weights=weights_2d):
         super().__init__()
-        assert type(means) == type(covs) == type(weights) == torch.Tensor, (
+        assert type(means) is type(covs) is type(weights) is torch.Tensor, (
             f"{type(means)=} {type(covs)=} {type(weights)=}"
         )
         self.means = means  # shape: (K, 2)

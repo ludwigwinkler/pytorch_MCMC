@@ -145,3 +145,4 @@ htmlcov/
 # PyTorch model files
 *.pth
 *.pt
+.vscode/settings.json

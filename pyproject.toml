@@ -21,6 +21,7 @@ dependencies = [
 	"hydra-core",
 	"tensordict",
 	"ruff",
+	"pre-commit>=2.21.0",
 ]
 readme = "README.md"
 requires-python = ">=3.7"
@@ -38,4 +39,7 @@ where = ["src"]
 
 [tool.ruff.lint]
 select = ["E", "F"]
-ignore = ["F401", "E402"]
+ignore = ["F401", "E402", "E501", "E731"]
+
+[tool.uv]
+prompt = 'mcmc'

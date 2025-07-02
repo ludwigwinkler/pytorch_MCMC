@@ -1,4 +1,8 @@
-import future, sys, os, datetime, argparse
+import future
+import sys
+import os
+import datetime
+import argparse
 
 # print(os.path.dirname(sys.executable))
 import torch
@@ -10,7 +14,7 @@ from matplotlib.lines import Line2D
 
 matplotlib.rcParams["figure.figsize"] = [10, 10]
 
-import torch
+
 from torch.nn import Module, Parameter
 from torch.nn import Linear, Tanh, ReLU
 import torch.nn.functional as F

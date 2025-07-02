@@ -129,14 +129,14 @@ def metropolishastings_sampler(energy_fn, x_init, n_steps=1000, proposal_std=0.5
         # Debiased running average (corrects for initial bias)
         if acceptance_ratio_ema is None:
             acceptance_ratio_ema = accept.int().float().mean()
-            ema_correction = 1.0
+            # ema_correction = 1.0
         else:
             acceptance_ratio_ema = (
                 acceptance_ratio_ema * ema_weight
                 + accept.int().float().mean() * (1 - ema_weight)
             )
-            ema_correction = 1 - ema_weight ** (_ + 1)
-        debiased_acceptance = acceptance_ratio_ema / ema_correction
+            # ema_correction = 1 - ema_weight ** (_ + 1)
+        # debiased_acceptance = acceptance_ratio_ema / ema_correction
         pbar.set_postfix({"Accept": float(acceptance_ratio_ema.mean())})
         x = torch.where(accept, x_new, x)
         samples.append(x.detach().clone())
