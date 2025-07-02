@@ -138,6 +138,7 @@ htmlcov/
 # VS Code
 .vscode
 .vscode/
+.vscode/settings.json
 
 # macOS
 .DS_Store
