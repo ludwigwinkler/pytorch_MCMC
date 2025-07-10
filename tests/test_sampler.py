@@ -7,9 +7,16 @@ from mcmc.sampler import MHSampler, MALASampler, SGLDSampler
 from mcmc.energy import Gaussian1D, GaussianMixture1D, GaussianMixture2D
 
 
-seed = 42
-torch.manual_seed(seed)
-np.random.seed(seed)
+@pytest.fixture(autouse=True)
+def set_seed():
+    """Automatically set seed before each test."""
+    seed = 42
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    # Also set random seed for Python's random module if needed
+    import random
+
+    random.seed(seed)
 
 
 @pytest.fixture
@@ -81,15 +88,15 @@ class TestMHSampler:
 
         # Create initial sample: batch of 100 chains, each with 1D x
         num_chains = 500
-        num_steps = 1000
-        x_init = torch.randn(num_chains, 1) * 3
+        num_steps = 2000
+        x_init = torch.randn(num_chains, 1)
         init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
 
         # Vectorize the energy function using torch.func.vmap
         energy_fn = torch.vmap(lambda x: Energy.energy(x), in_dims=(0,))
 
         # Run the sampler for a small number of steps
-        Sampler = MHSampler(std=1.0)
+        Sampler = MHSampler(std=0.5)
         samples, energy = Sampler(
             sample=init_sample, energy_fn=energy_fn, steps=num_steps, verbose=False
         )
@@ -187,9 +194,6 @@ class TestMALASampler:
         assert abs(sample_std - std) < 0.1, f"Expected std {std}, got {sample_std}"
 
     def test_MALA_gaussianmixture1d(self):
-        seed = 42
-        torch.manual_seed(seed)
-        np.random.seed(seed)
         Energy = GaussianMixture1D(
             weights=torch.tensor([0.5, 0.1, 0.25]),
             means=torch.tensor([-2.5, -0.5, 1.0]),
@@ -291,10 +295,6 @@ class TestSGLDSampler:
         assert abs(samples["x"].std() - std) < 0.1
 
     def test_sgld_gaussian_mixture(self):
-        # Seed everything for reproducibility
-        seed = 42
-        torch.manual_seed(seed)
-        np.random.seed(seed)
         Energy = GaussianMixture1D(
             weights=torch.tensor([0.5, 0.1, 0.25]),
             means=torch.tensor([-2.5, -0.5, 1.0]),
