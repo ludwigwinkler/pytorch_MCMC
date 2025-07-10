@@ -6,7 +6,7 @@ from tensordict import TensorDict
 from collections import OrderedDict
 
 
-def generate_random_string(length: int = None) -> str:
+def generate_random_string(length: int = 10) -> str:
     """Generate a random string of specified length or random length between 3-10."""
     if length is None:
         length = random.randint(3, 10)
@@ -106,7 +106,7 @@ class TestTensorDictKeyOrder:
             tensordict_keys = list(tensor_dict.keys())
 
             assert original_keys == tensordict_keys, (
-                f"Test {i+1}/{num_tests} failed!\n"
+                f"Test {i + 1}/{num_tests} failed!\n"
                 f"Key order not preserved!\n"
                 f"Original: {original_keys}\n"
                 f"TensorDict: {tensordict_keys}"

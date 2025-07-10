@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from tensordict import TensorDict
 from mcmc.utils import EMA
 
+from torch import Tensor
+
 
 __all__ = ["MHSampler", "MALASampler", "ImportanceSampler"]
 
@@ -18,11 +20,11 @@ class ImportanceSampler:
         self,
         energy_fn: Callable,
         proposal_distribution: torch.distributions.Distribution,
-        samples: int = 10_000,
+        num_samples: int = 10_000,
     ):
         metrics = {}
 
-        samples: torch.Tensor = proposal_distribution.sample((samples,))
+        samples: torch.Tensor = proposal_distribution.sample((num_samples,))
         log_prob = proposal_distribution.log_prob(samples)
 
         log_weights = -energy_fn(samples) - log_prob
@@ -94,7 +96,7 @@ class Sampler:
         steps: int = 1000,
         verbose: bool = True,
         buffer: Optional[int] = 50,
-    ):
+    ) -> tuple[TensorDict, torch.Tensor]:
         """
         Run the MCMC sampler.
 
@@ -155,9 +157,9 @@ class Sampler:
                 )
                 if buffer is not None and buffer > 0 and len(chain) > buffer:
                     chain.pop(0)
-            accept_ema(accept_ratio.detach().item())
+            accept_ema(float(accept_ratio.detach().item()))
             if verbose:
-                first_key = list(sample.keys())[0]
+                first_key: str = str(list(sample.keys())[0])  # type: ignore
                 print_str = {
                     "Accept": f"{accept_ema.val:.3f} Mean: {sample[first_key].mean():.3f} Std: {sample[first_key].std():.3f}"
                 }
@@ -169,9 +171,16 @@ class Sampler:
         )  # List[(sample,energy)] -> List[sample], List[energy]
         samples = torch.cat(samples, dim=0)
         energy = torch.cat(energy, dim=0)
-        return samples, energy
+        return samples, energy  # type: ignore
 
-    def accept_proposal(self, sample, proposal_sample, energy, proposal_energy, accept):
+    def accept_proposal(
+        self,
+        sample: TensorDict,
+        proposal_sample: TensorDict,
+        energy: Tensor,
+        proposal_energy,
+        accept,
+    ):
         """
         Accept or reject the proposal based on the acceptance criteria.
 
@@ -206,7 +215,7 @@ class Sampler:
             else:
                 new_sample.append(s)
                 new_energy.append(e)
-        sample = torch.cat(new_sample, dim=0)
+        sample = torch.cat(new_sample, dim=0)  # type: ignore
         energy = torch.stack(new_energy, dim=0)
         return sample, energy
 
@@ -298,7 +307,7 @@ class SGLDSampler(Sampler):
             grad_td,
         )
         proposal_sample = copy.deepcopy(sample)
-        proposal_sample[first_key] = proposal_sampled_td["sampled_param"]
+        proposal_sample[first_key] = proposal_sampled_td["sampled_param"]  # type: ignore
         proposal_args = list(proposal_sample.values())
         proposal_args = [
             arg.to_dict() if isinstance(arg, TensorDict) else arg
@@ -365,7 +374,7 @@ class MALASampler(Sampler):
         )
         # Update the original TensorDict
         proposal_sample = sample.clone()
-        proposal_sample[first_key] = proposal_sample_td["sampled_param"]
+        proposal_sample[first_key] = proposal_sample_td["sampled_param"]  # type: ignore
         # Forward transition log-probability
         # q(x'|x)   \propto exp(-||x' - x - step_size * \nabla log pi(x)||^2 / (4 * step_size))
         #           \propto exp(-||x' - x - step_size * \nabla log exp(-E(x)||^2 / (4 * step_size))
@@ -376,14 +385,12 @@ class MALASampler(Sampler):
             .sum(dim=-1)
             / (4 * step_size),
             grad_td,
-            proposal_sample_td,
+            proposal_sample_td,  # type: ignore
         )
         forward_energy = forward_energy.apply(
             lambda x: torch.einsum("b ... -> b", x)
         )  # Sum over all dimensions
-        forward_energy = sum(list(forward_energy.values())).unsqueeze(
-            -1
-        )  # Sum over all entries in TensorDict
+        forward_energy = sum(list(forward_energy.values())).unsqueeze(-1)  # type: ignore
         # Reverse transition log-probability
         proposal_args = list(proposal_sample.values())
         proposal_args = [
@@ -406,14 +413,12 @@ class MALASampler(Sampler):
             .sum(dim=-1)
             / (4 * step_size),
             grad_proposal_td,
-            proposal_sample_td,
+            proposal_sample_td,  # type: ignore
         )
         backward_energy = backward_energy.apply(
             lambda x: torch.einsum("b ... -> b", x)
         )  # Sum over all dimensions
-        backward_energy = sum(list(backward_energy.values())).unsqueeze(
-            -1
-        )  # Sum over all entries in TensorDict
+        backward_energy = sum(list(backward_energy.values())).unsqueeze(-1)  # type: ignore
 
         with torch.no_grad():
             proposal_energy = energy_fn(*proposal_args)

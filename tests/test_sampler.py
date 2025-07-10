@@ -3,7 +3,6 @@ import torch
 import numpy as np
 from tensordict import TensorDict
 from matplotlib import pyplot as plt
-
 from mcmc.sampler import MHSampler, MALASampler, SGLDSampler
 from mcmc.energy import Gaussian1D, GaussianMixture1D, GaussianMixture2D
 
@@ -275,7 +274,7 @@ class TestSGLDSampler:
             steps=num_steps,
             verbose=True,
             buffer=100,
-            burn_in=0.0,
+            burn_in=0,
         )
         # generate a histogram of the data samples and the samples from the MCMC sampler
         # data = Energy.sample(50_000)
