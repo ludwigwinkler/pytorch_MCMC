@@ -6,6 +6,7 @@ __pycache__/
 # user files
 *.chain
 *.ipynb
+.cursor
 
 # C extensions
 *.so
