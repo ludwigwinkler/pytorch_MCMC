@@ -4,7 +4,7 @@ import copy
 from tqdm import tqdm
 
 import torch
-from tensordict import TensorDict
+from tensordict import TensorDict, NonTensorData
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from numbers import Number
@@ -67,7 +67,7 @@ class ProbModel(Energy):
     #     return NLL
 
     @staticmethod
-    def energy(probmodel, params, buffers, data, target):
+    def energy(probmodel, params, buffers, data, target, other=None):
         mu, std = torch.func.functional_call(probmodel, (params, buffers), (data,))
         energy = -torch.distributions.Normal(mu, std).log_prob(target).mean(dim=-2)
         return energy
@@ -101,32 +101,29 @@ models = [copy.deepcopy(probmodel) for _ in range(num_chains)]
 
 params, buffers = torch.func.stack_module_state(models)
 init_samples = TensorDict(
-    {"params": TensorDict(params), "buffers": TensorDict(buffers)},
-    batch_size=num_chains,
+    {"params": params, "buffers": buffers, "data": x, "target": y, "aux": "abc"},
 )
 
 
-energy1 = lambda params, buffers, data, target: probmodel.energy(
+# %%
+energy1 = lambda params, buffers, data, target, aux: probmodel.energy(
     probmodel.train(), params, buffers, data, target
 )
-vmap_energy = torch.vmap(energy1, (0, 0, None, None), randomness="different")
+vmap_energy = torch.vmap(energy1, (0, 0, None, None, None), randomness="different")
+init_args = list(init_samples.values())
+init_args = [arg.to_dict() if isinstance(arg, TensorDict) else arg for arg in init_args]
 init_energy = vmap_energy(
-    # probmodel.train(),
-    init_samples["params"].to_dict(),
-    init_samples["buffers"].to_dict(),
-    x,
-    y,
+    *init_args,
 )
 
+args = list(init_samples.values())
+args = [arg.to_dict() if isinstance(arg, TensorDict) else arg for arg in args]
+
 grad_params, init_energy = torch.func.grad_and_value(
-    lambda p, b, x, y: torch.sum(vmap_energy(p, b, x, y)),
+    lambda p, b, x, y, aux: torch.sum(vmap_energy(p, b, x, y, aux)),
     argnums=(0,),
 )(
-    # probmodel.train(),
-    init_samples["params"].to_dict(),
-    init_samples["buffers"].to_dict(),
-    x,
-    y,
+    *args,
 )
 
 # 1: works

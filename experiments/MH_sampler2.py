@@ -29,6 +29,7 @@ plt.rcParams["legend.facecolor"] = "white"
 
 # %%
 
+
 # %%
 num_steps = 1_000
 num_chains = 500
