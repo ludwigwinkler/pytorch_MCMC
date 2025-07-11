@@ -9,7 +9,7 @@ from numbers import Number
 # import mcmc.sampler.MetropolisHastingAcceptance
 # from mcmc.sampler import MetropolisHastingAcceptance
 
-from mcmc.sampler import MetropolisHastingsAcceptance
+from mcmc.sampler import MALASampler, MHSampler, SGLDSampler
 from mcmc.energy import GaussianMixture1D, GaussianMixture2D
 from mcmc.utils import EMA, RepeatedCosineSchedule
 
@@ -28,11 +28,12 @@ plt.rcParams["legend.facecolor"] = "white"
 
 
 gmm = GaussianMixture2D()
-samples = gmm.sample(50_000)
+samples = gmm.sample(500_000)
 
 # 2D contour plot of samples2d
 x = samples[:, 0].numpy()
 y = samples[:, 1].numpy()
+# 2D histogram of the Gaussian Mixture Model samples
 plt.figure(figsize=(6, 5))
 plt.hist2d(x, y, bins=100, density=True, cmap="viridis")
 plt.colorbar(label="Density")
@@ -42,44 +43,31 @@ plt.title("2D Gaussian Mixture Samples")
 plt.show()
 
 # %%
-num_chains = 50_000
+
+
+# %%
+num_chains = 500
+num_steps = 2000
 proposal_std = 0.5
-vmap_energy = torch.vmap(gmm.energy, (0,))
+energy_fn = torch.vmap(gmm.energy, (0,))
 init_sample = TensorDict({"x": 3 * torch.randn((num_chains, 2)).clamp(-5, 5)})
-init_energy = vmap_energy(init_sample["x"])
-chain = [(init_sample, init_energy)]
+init_energy = energy_fn(init_sample["x"])
 
+schedule = RepeatedCosineSchedule(steps=num_steps, cycles=1, min=0.01, max=1.0)
+# Sampler = MALASampler(step_size=1.0, dampening=1.0, step_size_schedule=schedule)
+# Sampler = SGLDSampler(step_size=0.05, dampening=1.0)
+Sampler = MHSampler(std=1.0)
+samples, energy = Sampler(
+    sample=init_sample,
+    energy_fn=energy_fn,
+    steps=num_steps,
+    verbose=True,
+    buffer=500,
+    burn_in=50,
+)
 
-num_steps = [100, 1_000][1]
-accept_ema = EMA(ema_weight=0.99)
-pbar = tqdm(range(num_steps))
-schedule = RepeatedCosineSchedule(steps=num_steps, cycles=5)
-MH = MetropolisHastingsAcceptance()
-for step in pbar:
-    state, energy = chain[-1]
-    proposal_std_ = schedule(step=step, min=0.1, max=1.0)
-    proposal_state = state.clone().apply(
-        lambda x: x + torch.randn_like(x) * proposal_std_
-    )
-    proposal_energy = vmap_energy(proposal_state["x"])
-    accept: torch.Tensor = MH(energy, proposal_energy)
-    new_state = state.apply(
-        lambda state_, proposal_state_: torch.where(accept, proposal_state_, state_),
-        proposal_state,
-    )
-    chain += [(new_state, proposal_energy)]
-    accept_ratio = accept.sum() / accept.numel()
-    accept_ema(accept_ratio.item())
-    pbar.set_postfix(
-        {
-            "Accept": f"{accept_ema.val:.3f}",
-            "PropStd": f"{proposal_std_:.3f}",
-        }
-    )
-
-samples = chain[-1][0]["x"]
-x = samples[:, 0].numpy()
-y = samples[:, 1].numpy()
+x = samples["x"][:, 0].numpy()
+y = samples["x"][:, 1].numpy()
 plt.figure(figsize=(6, 5))
 plt.hist2d(x, y, bins=100, density=True, cmap="viridis")
 plt.colorbar(label="Density")

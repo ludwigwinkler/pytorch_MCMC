@@ -5,7 +5,21 @@
 - use pytorch lightning with automatic_optimization=False? would be good for multi-gpu support
 - switch statements for tuning of metropolis hasting sampler
 
+```python
+energy(params, buffers, other)
 
+sample = TensorDict({
+    "params/sample": params,
+    "buffers": buffers,
+    "other": NonTensorDict({'key': value})
+})
+
+if 'buffers' in sample:
+    buffers = sample.pop("buffers)
+assert len(tensordict) == 2
+tensordict, nontensordict = sample.split()
+new_sample = proposal_step(tensordict)
+```
 
 # torch-MC^2 (torch-MCMC)
 HMC on 3 layer NN | HMC on GMM
@@ -42,7 +56,7 @@ This could be as simple as a single particle that we move around a 2-D distribut
 
 It has four methods which have to be defined by the user:
 
-`MCMC_ProbModel.log_prob()`: 
+`MCMC_ProbModel.log_prob()`:
 
 Evaluates the log_probability of the likelihood of the model.
 
@@ -67,7 +81,7 @@ That way, dynamic samplers can simple access `probmodel.dataloader`.
 # Chain
 
 This is just a convenience container that stores the sampled values and can be queried for specific values to determine the progress of the sampling chain.
-The samples of the parameters of the model are stored as a list `chain.samples` where each entry is PyTorch's very own `state_dict()`. 
+The samples of the parameters of the model are stored as a list `chain.samples` where each entry is PyTorch's very own `state_dict()`.
 
 After the sampler is finished the samples of the model can be accessed through the property `chain.samples` which returns a list of `state_dict()`'s that can be loaded into the model.
 
@@ -76,9 +90,9 @@ An example:
 ```
 
 for sample_state_dict in chain.samples:
-    
+
     self.load_state_dict(sample_state_dict)
-    
+
     ... do something like ensemble prediction ...
 ```
 

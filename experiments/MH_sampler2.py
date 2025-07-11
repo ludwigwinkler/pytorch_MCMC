@@ -29,6 +29,7 @@ plt.rcParams["legend.facecolor"] = "white"
 
 # %%
 
+
 # %%
 num_steps = 1_000
 num_chains = 500
@@ -84,7 +85,7 @@ IS_energy_fn = Energy.energy
 IS = ImportanceSampler()
 _, _, Z_est, _ = IS(
     energy_fn=IS_energy_fn,
-    samples=10_000,
+    num_samples=10_000,
     proposal_distribution=proposal_distribution,
 )
 

@@ -12,7 +12,7 @@ class EMA:
         self.step = 0
         self.val_ = None
 
-    def __call__(self, val: Number):
+    def __call__(self, val: float) -> float:
         if self.val_ is None:
             self.val_ = val
             self.ema_correction = 1.0
