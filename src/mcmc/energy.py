@@ -166,7 +166,7 @@ class GaussianMixture2D(Energy):
         return self.combined_dist.log_prob(x).unsqueeze(-1)
 
     def energy(self, x):
-        return self.log_prob(x) + 1
+        return -self.log_prob(x)
 
 
 class LinearRegressionEnergy(Energy):

@@ -113,7 +113,11 @@ class Sampler:
         ), "energy_fn must be wrapped with torch.func.vmap for vectorized evaluation."
         accept_ema = EMA(ema_weight=0.99)
         pbar = tqdm(range(steps)) if verbose else range(steps)
-        energy = energy_fn(*sample.values())
+        init_args = [
+            arg.to_dict() if isinstance(arg, TensorDict) else arg
+            for arg in list(sample.values())
+        ]
+        energy = energy_fn(*init_args)
         chain = []
         for step in pbar:
             proposal_dict = self.proposal_step(
@@ -159,12 +163,10 @@ class Sampler:
                     chain.pop(0)
             accept_ema(float(accept_ratio.detach().item()))
             if verbose:
-                first_key: str = str(list(sample.keys())[0])  # type: ignore
-                print_str = {
-                    "Accept": f"{accept_ema.val:.3f} Mean: {sample[first_key].mean():.3f} Std: {sample[first_key].std():.3f}"
-                }
+                # first_key: str = str(list(sample.keys())[0])  # type: ignore
+                print_str = {"Accept": f"{accept_ema.val:.3f} {energy.mean():.3f}"}
                 for key, value in metrics.items():
-                    print_str["Accept"] += f" {key}: {value:.3f}"
+                    print_str["Accept"] += f" {key}: {value:.3f} "
                 pbar.set_postfix(print_str)  # type: ignore
         samples, energy = zip(
             *chain
@@ -194,7 +196,7 @@ class Sampler:
         """
         proposal_sample.auto_batch_size_(1)
         sample.auto_batch_size_(1)
-        num_chains = proposal_sample.batch_size[0]
+        num_chains = energy.shape[0]
         new_sample: list = []
         new_energy = []
         first_key = list(sample.keys())[0]
@@ -390,7 +392,7 @@ class MALASampler(Sampler):
         forward_energy = forward_energy.apply(
             lambda x: torch.einsum("b ... -> b", x)
         )  # Sum over all dimensions
-        forward_energy = sum(list(forward_energy.values())).unsqueeze(-1)  # type: ignore
+        forward_energy = sum(list(forward_energy.values(True, True))).unsqueeze(-1)  # type: ignore
         # Reverse transition log-probability
         proposal_args = list(proposal_sample.values())
         proposal_args = [
@@ -418,7 +420,7 @@ class MALASampler(Sampler):
         backward_energy = backward_energy.apply(
             lambda x: torch.einsum("b ... -> b", x)
         )  # Sum over all dimensions
-        backward_energy = sum(list(backward_energy.values())).unsqueeze(-1)  # type: ignore
+        backward_energy = sum(list(backward_energy.values(True, True))).unsqueeze(-1)  # type: ignore
 
         with torch.no_grad():
             proposal_energy = energy_fn(*proposal_args)

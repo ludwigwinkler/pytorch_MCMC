@@ -128,6 +128,40 @@ class TestMHSampler:
         # plt.plot(torch.linspace(-5, 5, 100), Energy.prob(torch.linspace(-5, 5, 100)))
         # plt.ylim(0, 1)
 
+    def test_MH_gaussianmixture2d(self):
+        """Test MH sampler on 2D Gaussian mixture."""
+        Energy = GaussianMixture2D()
+
+        num_chains = 500
+        num_steps = 2000
+        buffer = 50  # Default buffer size
+        x_init = 3 * torch.randn((num_chains, 2)).clamp(-5, 5)
+        init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
+
+        energy_fn = torch.vmap(Energy.energy, (0,))
+
+        Sampler = MHSampler(std=1.0)
+        samples, energy = Sampler(
+            sample=init_sample,
+            energy_fn=energy_fn,
+            steps=num_steps,
+            verbose=False,
+            buffer=buffer,
+        )
+
+        # Compare with target distribution
+        # target_samples = Energy.sample(50_000)
+
+        # Check that sample statistics are reasonable
+        # The sampler returns buffer * num_chains samples
+        expected_samples = buffer * num_chains
+        assert samples["x"].shape == (expected_samples, 2)
+        assert energy.shape == (expected_samples, 1)  # Energy has an extra dimension
+
+        # Check that samples are within reasonable bounds
+        assert samples["x"].min() > -10
+        assert samples["x"].max() < 10
+
 
 class TestMALASampler:
     """Test suite for Metropolis-Hastings sampler."""
@@ -251,6 +285,40 @@ class TestMALASampler:
         # plt.plot(torch.linspace(-5, 5, 100), Energy.prob(torch.linspace(-5, 5, 100)))
         # plt.ylim(0, 1)
 
+    def test_MALA_gaussianmixture2d(self):
+        """Test MALA sampler on 2D Gaussian mixture."""
+        Energy = GaussianMixture2D()
+
+        num_chains = 500
+        num_steps = 2000
+        buffer = 50  # Default buffer size
+        x_init = 3 * torch.randn((num_chains, 2)).clamp(-5, 5)
+        init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
+
+        energy_fn = torch.vmap(Energy.energy, (0,))
+
+        Sampler = MALASampler(step_size=1.0, dampening=1.0)
+        samples, energy = Sampler(
+            sample=init_sample,
+            energy_fn=energy_fn,
+            steps=num_steps,
+            verbose=False,
+            buffer=buffer,
+        )
+
+        # Compare with target distribution
+        # target_samples = Energy.sample(50_000)
+
+        # Check that sample statistics are reasonable
+        # The sampler returns buffer * num_chains samples
+        expected_samples = buffer * num_chains
+        assert samples["x"].shape == (expected_samples, 2)
+        assert energy.shape == (expected_samples, 1)  # Energy has an extra dimension
+
+        # Check that samples are within reasonable bounds
+        assert samples["x"].min() > -10
+        assert samples["x"].max() < 10
+
 
 class TestSGLDSampler:
     """Test suite for SGLD sampler."""
@@ -328,3 +396,37 @@ class TestSGLDSampler:
 
         assert torch.allclose(samples["x"].mean(), target_mean, atol=0.1)
         assert torch.allclose(samples["x"].std(), target_std, atol=0.1)
+
+    def test_sgld_gaussianmixture2d(self):
+        """Test SGLD sampler on 2D Gaussian mixture."""
+        Energy = GaussianMixture2D()
+
+        num_chains = 500
+        num_steps = 2000
+        buffer = 50  # Default buffer size
+        x_init = 3 * torch.randn((num_chains, 2)).clamp(-5, 5)
+        init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
+
+        energy_fn = torch.vmap(Energy.energy, (0,))
+
+        sampler = SGLDSampler(step_size=0.05)
+        samples, energy = sampler(
+            sample=init_sample,
+            energy_fn=energy_fn,
+            steps=num_steps,
+            verbose=False,
+            buffer=buffer,
+        )
+
+        # Compare with target distribution
+        # target_samples = Energy.sample(50_000)
+
+        # Check that sample statistics are reasonable
+        # The sampler returns buffer * num_chains samples
+        expected_samples = buffer * num_chains
+        assert samples["x"].shape == (expected_samples, 2)
+        assert energy.shape == (expected_samples, 1)  # Energy has an extra dimension
+
+        # Check that samples are within reasonable bounds
+        assert samples["x"].min() > -10
+        assert samples["x"].max() < 10

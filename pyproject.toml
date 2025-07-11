@@ -22,8 +22,8 @@ dependencies = [
 	"tensordict",
 	"ruff",
 	"pre-commit>=2.21.0",
-	"ty",
-	"seaborn"
+	"seaborn",
+	"tqdm",
 ]
 readme = "README.md"
 requires-python = ">=3.11"
