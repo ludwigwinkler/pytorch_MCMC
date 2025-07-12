@@ -363,7 +363,7 @@ class TestMALASampler:
         vmap_energy = torch.vmap(
             energy, (0, 0, None, None, None), randomness="different"
         )
-        Sampler = MALASampler(step_size=0.01, dampening=0.0)
+        Sampler = MALASampler(step_size=0.001, dampening=0.01)
         samples, energies = Sampler(
             sample=init_samples,
             energy_fn=vmap_energy,
