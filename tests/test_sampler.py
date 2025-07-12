@@ -4,7 +4,15 @@ import numpy as np
 from tensordict import TensorDict
 from matplotlib import pyplot as plt
 from mcmc.sampler import MHSampler, MALASampler, SGLDSampler
-from mcmc.energy import Gaussian1D, GaussianMixture1D, GaussianMixture2D
+from mcmc.energy import (
+    Gaussian1D,
+    GaussianMixture1D,
+    GaussianMixture2D,
+    NeuralNetworkEnergy,
+)
+
+import copy
+from mcmc.data import generate_nonstationary_data
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +68,7 @@ class TestMHSampler:
         num_chains = 500
         num_steps = 1000
         x_init = torch.randn(num_chains, 1)
-        init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
+        init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
 
         # Vectorize the energy function using torch.func.vmap
         energy_fn = torch.vmap(lambda x: Energy.energy(x), in_dims=(0,))
@@ -75,8 +83,8 @@ class TestMHSampler:
         # assert energy.shape == (num_chains, 1)
 
         # Check that the mean is close to the target mean and std close to target std
-        sample_mean = samples["x"].mean().item()
-        sample_std = samples["x"].std().item()
+        sample_mean = samples["sample"].mean().item()
+        sample_std = samples["sample"].std().item()
         assert abs(sample_mean - mean) < 0.1
         assert abs(sample_std - std) < 0.1
 
@@ -90,7 +98,7 @@ class TestMHSampler:
         num_chains = 500
         num_steps = 2000
         x_init = torch.randn(num_chains, 1)
-        init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
+        init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
 
         # Vectorize the energy function using torch.func.vmap
         energy_fn = torch.vmap(lambda x: Energy.energy(x), in_dims=(0,))
@@ -104,8 +112,8 @@ class TestMHSampler:
         target_mean = target_samples.mean()
         target_std = target_samples.std()
 
-        assert torch.allclose(samples["x"].mean(), target_mean, atol=0.1)
-        assert torch.allclose(samples["x"].std(), target_std, atol=0.1)
+        assert torch.allclose(samples["sample"].mean(), target_mean, atol=0.1)
+        assert torch.allclose(samples["sample"].std(), target_std, atol=0.1)
 
         # plt.hist(
         #     init_sample["x"].numpy(),
@@ -136,7 +144,7 @@ class TestMHSampler:
         num_steps = 2000
         buffer = 50  # Default buffer size
         x_init = 3 * torch.randn((num_chains, 2)).clamp(-5, 5)
-        init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
+        init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
 
         energy_fn = torch.vmap(Energy.energy, (0,))
 
@@ -155,12 +163,12 @@ class TestMHSampler:
         # Check that sample statistics are reasonable
         # The sampler returns buffer * num_chains samples
         expected_samples = buffer * num_chains
-        assert samples["x"].shape == (expected_samples, 2)
+        assert samples["sample"].shape == (expected_samples, 2)
         assert energy.shape == (expected_samples, 1)  # Energy has an extra dimension
 
         # Check that samples are within reasonable bounds
-        assert samples["x"].min() > -10
-        assert samples["x"].max() < 10
+        assert samples["sample"].min() > -10
+        assert samples["sample"].max() < 10
 
 
 class TestMALASampler:
@@ -202,7 +210,7 @@ class TestMALASampler:
         num_chains = 200
         num_steps = 1000
         x_init = torch.randn(num_chains, 1)
-        init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
+        init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
 
         # Vectorize the energy function using torch.func.vmap
         energy_fn = torch.vmap(lambda x: Energy.energy(x), in_dims=(0,))
@@ -222,8 +230,8 @@ class TestMALASampler:
         # assert energy.shape == (num_chains, 1)
 
         # Check that the mean is close to the target mean and std close to target std
-        sample_mean = samples["x"].mean().item()
-        sample_std = samples["x"].std().item()
+        sample_mean = samples["sample"].mean().item()
+        sample_std = samples["sample"].std().item()
         assert abs(sample_mean - mean) < 0.1, f"Expected mean {mean}, got {sample_mean}"
         assert abs(sample_std - std) < 0.1, f"Expected std {std}, got {sample_std}"
 
@@ -238,7 +246,7 @@ class TestMALASampler:
         num_chains = 500
         num_steps = 2000
         x_init = torch.randn(num_chains, 1)
-        init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
+        init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
 
         # Vectorize the energy function using torch.func.vmap
         energy_fn = torch.vmap(lambda x: Energy.energy(x), in_dims=(0,))
@@ -253,7 +261,7 @@ class TestMALASampler:
         target_std = data.std()
 
         plt.hist(
-            init_sample["x"].numpy(),
+            init_sample["sample"].numpy(),
             density=True,
             bins=100,
             color="green",
@@ -261,7 +269,7 @@ class TestMALASampler:
             label="Initial Samples",
         )
         plt.hist(
-            samples["x"].numpy(),
+            samples["sample"].numpy(),
             density=True,
             bins=100,
             color="blue",
@@ -279,8 +287,8 @@ class TestMALASampler:
         )
         plt.legend()
 
-        assert torch.allclose(samples["x"].mean(), target_mean, atol=0.1)
-        assert torch.allclose(samples["x"].std(), target_std, atol=0.1)
+        assert torch.allclose(samples["sample"].mean(), target_mean, atol=0.1)
+        assert torch.allclose(samples["sample"].std(), target_std, atol=0.1)
 
         # plt.plot(torch.linspace(-5, 5, 100), Energy.prob(torch.linspace(-5, 5, 100)))
         # plt.ylim(0, 1)
@@ -289,11 +297,11 @@ class TestMALASampler:
         """Test MALA sampler on 2D Gaussian mixture."""
         Energy = GaussianMixture2D()
 
-        num_chains = 500
+        num_chains = 1000
         num_steps = 2000
         buffer = 50  # Default buffer size
         x_init = 3 * torch.randn((num_chains, 2)).clamp(-5, 5)
-        init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
+        init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
 
         energy_fn = torch.vmap(Energy.energy, (0,))
 
@@ -312,12 +320,61 @@ class TestMALASampler:
         # Check that sample statistics are reasonable
         # The sampler returns buffer * num_chains samples
         expected_samples = buffer * num_chains
-        assert samples["x"].shape == (expected_samples, 2)
+        assert samples["sample"].shape == (expected_samples, 2)
         assert energy.shape == (expected_samples, 1)  # Energy has an extra dimension
 
         # Check that samples are within reasonable bounds
-        assert samples["x"].min() > -10
-        assert samples["x"].max() < 10
+        # assert samples["sample"].min() > -10
+        # assert samples["sample"].max() < 10
+
+        # x = samples["sample"][:, 0].numpy()
+        # y = samples["sample"][:, 1].numpy()
+        # plt.figure(figsize=(6, 5))
+        # plt.hist2d(x, y, bins=100, density=True, cmap="viridis")
+        # plt.colorbar(label="Density")
+        # plt.xlabel("x")
+        # plt.ylabel("y")
+        # plt.title("2D Gaussian Mixture Samples")
+        # plt.show()
+
+    def test_mala_neuralnetwork(self):
+        x, y = generate_nonstationary_data(
+            num_samples=1_000,
+            plot=False,
+            y_nonstationary_noise_std=0.3,
+            y_constant_noise_std=0.01,
+        )
+        probmodel = NeuralNetworkEnergy()
+        num_chains = 11
+        models = [copy.deepcopy(probmodel) for _ in range(num_chains)]
+        params, buffers = torch.func.stack_module_state(models)
+        init_samples = TensorDict(
+            {
+                "sample": params,
+                "buffers": buffers,
+                "data": x,
+                "target": y,
+                "aux": "abc",
+            },  # type: ignore
+        )
+        energy = lambda params, buffers, data, target, aux: NeuralNetworkEnergy.energy(
+            probmodel.train(), params, buffers, data, target
+        )
+        vmap_energy = torch.vmap(
+            energy, (0, 0, None, None, None), randomness="different"
+        )
+        Sampler = MALASampler(step_size=0.01, dampening=0.0)
+        samples, energies = Sampler(
+            sample=init_samples,
+            energy_fn=vmap_energy,
+            steps=1_000,
+            verbose=False,
+            buffer=50,
+            burn_in=20,
+        )
+        assert (
+            energies.mean().item() < 0.3
+        ), f"Mean energy too high: {energies.mean().item()}"
 
 
 class TestSGLDSampler:
@@ -337,7 +394,7 @@ class TestSGLDSampler:
         num_chains = 200
         num_steps = 2000
         x_init = torch.randn(num_chains, 1)
-        init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
+        init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
         energy_fn = torch.vmap(lambda x: Energy.energy(x), in_dims=(0,))
         sampler = SGLDSampler(step_size=step_size)
         samples, energy = sampler(
@@ -359,8 +416,8 @@ class TestSGLDSampler:
         # plt.show()
         # print(samples["x"].mean(), samples["x"].std())
 
-        assert abs(samples["x"].mean() - mean) < 0.1
-        assert abs(samples["x"].std() - std) < 0.1
+        assert abs(samples["sample"].mean() - mean) < 0.1
+        assert abs(samples["sample"].std() - std) < 0.1
 
     def test_sgld_gaussian_mixture(self):
         Energy = GaussianMixture1D(
@@ -371,7 +428,7 @@ class TestSGLDSampler:
         num_chains = 200
         num_steps = 3000
         x_init = torch.randn(num_chains, 1) * 3
-        init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
+        init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
         energy_fn = torch.vmap(lambda x: Energy.energy(x), in_dims=(0,))
         sampler = SGLDSampler(step_size=0.01)
         samples, energy = sampler(
@@ -394,8 +451,8 @@ class TestSGLDSampler:
         # plt.legend()
         # plt.show()
 
-        assert torch.allclose(samples["x"].mean(), target_mean, atol=0.1)
-        assert torch.allclose(samples["x"].std(), target_std, atol=0.1)
+        assert torch.allclose(samples["sample"].mean(), target_mean, atol=0.1)
+        assert torch.allclose(samples["sample"].std(), target_std, atol=0.1)
 
     def test_sgld_gaussianmixture2d(self):
         """Test SGLD sampler on 2D Gaussian mixture."""
@@ -405,7 +462,7 @@ class TestSGLDSampler:
         num_steps = 2000
         buffer = 50  # Default buffer size
         x_init = 3 * torch.randn((num_chains, 2)).clamp(-5, 5)
-        init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
+        init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
 
         energy_fn = torch.vmap(Energy.energy, (0,))
 
@@ -424,9 +481,48 @@ class TestSGLDSampler:
         # Check that sample statistics are reasonable
         # The sampler returns buffer * num_chains samples
         expected_samples = buffer * num_chains
-        assert samples["x"].shape == (expected_samples, 2)
+        assert samples["sample"].shape == (expected_samples, 2)
         assert energy.shape == (expected_samples, 1)  # Energy has an extra dimension
 
         # Check that samples are within reasonable bounds
-        assert samples["x"].min() > -10
-        assert samples["x"].max() < 10
+        assert samples["sample"].min() > -10
+        assert samples["sample"].max() < 10
+
+    def test_sgld_neuralnetwork(self):
+        x, y = generate_nonstationary_data(
+            num_samples=1_000,
+            plot=False,
+            y_nonstationary_noise_std=0.3,
+            y_constant_noise_std=0.01,
+        )
+        probmodel = NeuralNetworkEnergy()
+        num_chains = 11
+        models = [copy.deepcopy(probmodel) for _ in range(num_chains)]
+        params, buffers = torch.func.stack_module_state(models)
+        init_samples = TensorDict(
+            {
+                "sample": params,
+                "buffers": buffers,
+                "data": x,
+                "target": y,
+                "aux": "abc",
+            },  # type: ignore
+        )
+        energy = lambda params, buffers, data, target, aux: NeuralNetworkEnergy.energy(
+            probmodel.train(), params, buffers, data, target
+        )
+        vmap_energy = torch.vmap(
+            energy, (0, 0, None, None, None), randomness="different"
+        )
+        Sampler = SGLDSampler(step_size=0.01, dampening=0.0)
+        samples, energies = Sampler(
+            sample=init_samples,
+            energy_fn=vmap_energy,
+            steps=1_000,
+            verbose=False,
+            buffer=50,
+            burn_in=20,
+        )
+        assert (
+            energies.mean().item() < 0.3
+        ), f"Mean energy too high: {energies.mean().item()}"

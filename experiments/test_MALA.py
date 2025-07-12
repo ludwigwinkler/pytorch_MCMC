@@ -32,8 +32,8 @@ energy_fn = torch.vmap(lambda x: Energy.energy(x), in_dims=(0,))
 # Run the sampler for a small number of steps
 # Sampler = MALASampler(step_size=.1, dampening=1.0)
 # Sampler = SGLDSampler(step_size_schedule=lambda t: 0.5 * (1 - t / num_steps), dampening=1.0)
-Sampler = SGLDSampler(step_size=0.01)
-# Sampler = MHSampler(std=1.)
+# Sampler = SGLDSampler(step_size=0.01)
+Sampler = MHSampler(std=1.0)
 samples, energy = Sampler(
     sample=init_sample,
     energy_fn=energy_fn,

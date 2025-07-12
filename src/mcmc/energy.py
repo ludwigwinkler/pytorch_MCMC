@@ -192,3 +192,39 @@ class LinearRegressionEnergy(Energy):
         return -0.5 * ((y - pred) / self.sigma) ** 2 - torch.log(
             self.sigma * torch.sqrt(2 * torch.tensor(torch.pi))
         )
+
+
+class NeuralNetworkEnergy(Energy):
+    """
+    Probabilistic neural network for regression with Gaussian likelihood.
+    Returns mean and std for each input, and computes negative log-likelihood energy.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.model = torch.nn.Sequential(
+            torch.nn.BatchNorm1d(1),
+            torch.nn.Linear(1, 32),
+            torch.nn.Tanh(),
+            torch.nn.Linear(32, 64),
+            torch.nn.Tanh(),
+            torch.nn.Linear(64, 64),
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, 2),
+        )
+
+    def forward(self, x):
+        out = self.model(x)
+        mu, log_std = out.chunk(2, dim=-1)
+        return mu, torch.nn.functional.softplus(log_std)
+
+    @staticmethod
+    def energy(probmodel, params, buffers, data, target, other=None):
+        mu, std = torch.func.functional_call(probmodel, (params, buffers), (data,))
+        energy = -torch.distributions.Normal(mu, std).log_prob(target).mean(dim=-2)
+        return energy
+
+    @staticmethod
+    def predict(prob_model, params, buffers, data):
+        mu, std = torch.func.functional_call(prob_model, (params, buffers), (data,))
+        return mu, std

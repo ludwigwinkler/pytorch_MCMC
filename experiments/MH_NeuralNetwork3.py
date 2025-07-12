@@ -15,7 +15,12 @@ from mcmc.sampler import (
     SGLDSampler,
     MHSampler,
 )
-from mcmc.energy import Energy, GaussianMixture1D, GaussianMixture2D
+from mcmc.energy import (
+    Energy,
+    GaussianMixture1D,
+    GaussianMixture2D,
+    NeuralNetworkEnergy,
+)
 from mcmc.utils import EMA, RepeatedCosineSchedule
 from mcmc.data import generate_nonstationary_data, generate_multimodal_linear_regression
 
@@ -106,7 +111,7 @@ models = [copy.deepcopy(probmodel) for _ in range(num_chains)]
 
 params, buffers = torch.func.stack_module_state(models)
 init_samples = TensorDict(
-    {"params": params, "buffers": buffers, "data": x, "target": y, "aux": "abc"},
+    {"sample": params, "buffers": buffers, "data": x, "target": y, "aux": "abc"},  # type: ignore
 )
 
 
@@ -163,33 +168,36 @@ def plot_uncertainty(params, buffers, title=""):
 
 
 # %%
-
-# SGLD Sampling
-print("Running SGLD sampling...")
-
-# Create SGLD sampler
-# Sampler = SGLDSampler(step_size=0.01, dampening=0.001)
-# Sampler = MALASampler(step_size=0.01, dampening=0.0)
-Sampler = MHSampler(std=0.01)
-
-# Run SGLD sampling
-num_steps = 500
+x, y = generate_nonstationary_data(
+    num_samples=1_000,
+    plot=False,
+    y_nonstationary_noise_std=0.3,
+    y_constant_noise_std=0.01,
+)
+probmodel = NeuralNetworkEnergy()
+num_chains = 11
+models = [copy.deepcopy(probmodel) for _ in range(num_chains)]
+params, buffers = torch.func.stack_module_state(models)
+init_samples = TensorDict(
+    {"sample": params, "buffers": buffers, "data": x, "target": y, "aux": "abc"},  # type: ignore
+)
+energy = lambda params, buffers, data, target, aux: NeuralNetworkEnergy.energy(
+    probmodel.train(), params, buffers, data, target
+)
+vmap_energy = torch.vmap(energy, (0, 0, None, None, None), randomness="different")
+Sampler = SGLDSampler(step_size=0.01, dampening=0.0)
 samples, energies = Sampler(
     sample=init_samples,
-    energy_fn=vmap_energy,  # Use the existing vmap_energy directly
-    steps=num_steps,
+    energy_fn=vmap_energy,
+    steps=1_000,
     verbose=True,
     buffer=50,
-    burn_in=100,
+    burn_in=20,
 )
+assert energies.mean().item() < 0.3, f"Mean energy too high: {energies.mean().item()}"
 
-print(
-    f"SGLD sampling completed. Final energy: {torch.stack(energies).mean().item():.4f}"
-)
-params = torch.cat([sample["params"] for sample in samples])
-buffers = torch.cat([sample["buffers"] for sample in samples])
 
 # Plot results from SGLD sampling
-plot_uncertainty(params, buffers, title="SGLD Sampling")
+plot_uncertainty(samples["sample"], samples["buffers"], title="SGLD Sampling")
 
 # %%

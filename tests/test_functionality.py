@@ -27,7 +27,7 @@ def test_sampler_functionality(
     num_chains = 8
     num_steps = 5
     x = torch.randn(num_chains, 1)
-    init_sample = TensorDict({"x": x}, batch_size=[num_chains])
+    init_sample = TensorDict({"sample": x}, batch_size=[num_chains])
     energy = EnergyClass(**energy_kwargs)
     energy_fn = torch.vmap(lambda x: energy.energy(x), in_dims=(0,))
     sampler = SamplerClass(**sampler_kwargs)
@@ -42,7 +42,7 @@ def test_sampler_functionality(
     # Check output types and shapes
     assert isinstance(samples, TensorDict)
     assert isinstance(energies, torch.Tensor)
-    assert samples.batch_size[0] == num_chains * num_steps
+    assert samples["sample"].shape[0] == num_chains * num_steps
     assert energies.shape[0] == num_chains * num_steps
 
 
@@ -68,7 +68,7 @@ def test_sampler_functionality_with_extra_inputs(
     num_steps = 5
     x = torch.randn(num_chains, 1)
     T = torch.randn(num_chains, 1).abs() + 1
-    init_sample = TensorDict({"x": x, "T": T, "other": "abc"})
+    init_sample = TensorDict({"sample": x, "T": T, "other": "abc"})
     energy = EnergyClass(**energy_kwargs)
     energy_fn = torch.vmap(
         lambda x, T, other: energy.energy(x, T, other), in_dims=(0, 0, None)
@@ -85,5 +85,5 @@ def test_sampler_functionality_with_extra_inputs(
     # Check output types and shapes
     assert isinstance(samples, TensorDict)
     assert isinstance(energies, torch.Tensor)
-    assert samples.batch_size[0] == num_chains * num_steps
+    assert samples["sample"].shape[0] == num_chains * num_steps
     assert energies.shape[0] == num_chains * num_steps
