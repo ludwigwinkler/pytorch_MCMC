@@ -247,7 +247,7 @@ class Sampler:
                 new_energy.append(e)
 
         # Reconstruct full TensorDict with updated vmapped parameters
-        result_sample = sample.clone()
+        result_sample = copy.deepcopy(sample)
         result_filtered = torch.cat(new_sample, dim=0)
 
         # Update only the vmapped keys
@@ -276,7 +276,7 @@ class MHSampler(Sampler):
 
         # Apply proposal function to the first vmapped parameter key
         proposal_fn = functools.partial(self.proposal_fn, std=std)
-        proposal_sample = sample.clone()
+        proposal_sample = copy.deepcopy(sample)
         proposal_sample["sample"] = proposal_fn(sample["sample"])
 
         proposal_energy = energy_fn(*_flatten_args(proposal_sample))
@@ -334,24 +334,20 @@ class SGLDSampler(Sampler):
             energy_.detach()
             grad_tensor = grad[0]
             grad_td = TensorDict({"sample": grad_tensor})
-        proposal_sample = (
-            sample.select("sample")
-            .clone()
-            .apply(
-                lambda x, grad: x
-                - step_size * grad
-                + torch.randn_like(x) * (2 * step_size * dampening) ** 0.5,
-                grad_td,
-            )
+        proposal_sample = copy.deepcopy(sample.detach().select("sample")).apply(
+            lambda x, grad: x
+            - step_size * grad
+            + torch.randn_like(x) * (2 * step_size * dampening) ** 0.5,
+            grad_td,
         )
-        proposal_sample = copy.deepcopy(sample).update(proposal_sample)
+        proposal_sample = copy.deepcopy(sample).update(proposal_sample).detach()
         proposal_args = [
             arg.to_dict() if isinstance(arg, TensorDict) else arg
             for arg in list(proposal_sample.values())
         ]
         with torch.no_grad():
-            proposal_energy = energy_fn(*proposal_args)
-            energy = energy_fn(*args)
+            proposal_energy = energy_fn(*proposal_args).detach()
+            energy = energy_fn(*args).detach()
         return {
             "energy": energy,
             "proposal_sample": proposal_sample,
@@ -409,7 +405,7 @@ class MALASampler(Sampler):
             grad_td,
         )
         # Update the original TensorDict
-        proposal_sample = sample.clone()
+        proposal_sample = copy.deepcopy(sample.detach())
         proposal_sample[first_key] = proposal_sample_td["sampled_param"]  # type: ignore
         # Forward transition log-probability
         # q(x'|x)   \propto exp(-||x' - x - step_size * \nabla log pi(x)||^2 / (4 * step_size))
@@ -460,10 +456,10 @@ class MALASampler(Sampler):
             proposal_energy = energy_fn(*proposal_args)
             energy = energy_fn(*args)
         return {
-            "energy": energy,
-            "proposal_sample": proposal_sample,
-            "proposal_energy": proposal_energy,
-            "forward_transition_log_prob": forward_energy,
-            "backward_transition_log_prob": backward_energy,
+            "energy": energy.detach(),
+            "proposal_sample": proposal_sample.detach(),
+            "proposal_energy": proposal_energy.detach(),
+            "forward_transition_log_prob": forward_energy.detach(),
+            "backward_transition_log_prob": backward_energy.detach(),
             "metrics": metrics,
         }

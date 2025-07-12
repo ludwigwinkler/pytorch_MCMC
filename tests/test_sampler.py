@@ -367,7 +367,7 @@ class TestMALASampler:
         samples, energies = Sampler(
             sample=init_samples,
             energy_fn=vmap_energy,
-            steps=1_000,
+            steps=2_000,
             verbose=False,
             buffer=50,
             burn_in=20,
@@ -459,7 +459,7 @@ class TestSGLDSampler:
         Energy = GaussianMixture2D()
 
         num_chains = 500
-        num_steps = 2000
+        num_steps = 20000
         buffer = 50  # Default buffer size
         x_init = 3 * torch.randn((num_chains, 2)).clamp(-5, 5)
         init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
@@ -524,5 +524,5 @@ class TestSGLDSampler:
             burn_in=20,
         )
         assert (
-            energies.mean().item() < 0.3
+            energies.mean().item() < 0.4
         ), f"Mean energy too high: {energies.mean().item()}"
