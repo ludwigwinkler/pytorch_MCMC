@@ -14,6 +14,10 @@ from torch import Tensor
 __all__ = ["MHSampler", "MALASampler", "ImportanceSampler"]
 
 
+def _flatten_args(td):
+    return [v.to_dict() if isinstance(v, TensorDict) else v for v in td.values()]
+
+
 @dataclass
 class ImportanceSampler:
     def __call__(
@@ -157,23 +161,37 @@ class Sampler:
             accept_ratio = accept.float().mean()
             if step >= burn_in:
                 chain.append(
-                    (copy.deepcopy(sample).auto_batch_size_(), copy.deepcopy(energy))
+                    (
+                        copy.deepcopy(sample.detach()).auto_batch_size_(),
+                        copy.deepcopy(energy.detach()),
+                    )
                 )
                 if buffer is not None and buffer > 0 and len(chain) > buffer:
                     chain.pop(0)
             accept_ema(float(accept_ratio.detach().item()))
             if verbose:
-                # first_key: str = str(list(sample.keys())[0])  # type: ignore
                 print_str = {"Accept": f"{accept_ema.val:.3f} {energy.mean():.3f}"}
                 for key, value in metrics.items():
                     print_str["Accept"] += f" {key}: {value:.3f} "
                 pbar.set_postfix(print_str)  # type: ignore
-        samples, energy = zip(
+        samples, energies = zip(
             *chain
         )  # List[(sample,energy)] -> List[sample], List[energy]
-        samples = torch.cat(samples, dim=0)
-        energy = torch.cat(energy, dim=0)
-        return samples, energy  # type: ignore
+
+        # Stack 'sample' and 'buffers' keys, preserve other keys from first sample
+        vmap_keys = ["sample", "buffers"] if "buffers" in samples[0] else ["sample"]
+        vmap_entries = [
+            TensorDict(s.select(*vmap_keys), batch_size=[energy.shape[0]])
+            for s in samples
+        ]
+        non_vmap_entries = samples[0].exclude(*vmap_keys)
+        stacked_vmapped = torch.cat(vmap_entries, dim=0)
+        samples = TensorDict(
+            {k: v for k, v in stacked_vmapped.items()}
+            | {k: v for k, v in non_vmap_entries.items()}
+        )
+        energy = torch.cat(energies, dim=0)
+        return samples, energy
 
     def accept_proposal(
         self,
@@ -185,6 +203,7 @@ class Sampler:
     ):
         """
         Accept or reject the proposal based on the acceptance criteria.
+        Only processes the first vmapped parameter key and optionally 'buffers' key.
 
         Args:
             sample (TensorDict): Current sample.
@@ -194,32 +213,49 @@ class Sampler:
         Returns:
             TensorDict: Updated sample after accepting or rejecting the proposal.
         """
-        proposal_sample.auto_batch_size_(1)
-        sample.auto_batch_size_(1)
+        # Filter to only the first vmapped parameter key and optionally 'buffers' key
+        vmapped_keys = ["sample"]  # First key (e.g., "params")
+        if "buffers" in sample:
+            vmapped_keys.append("buffers")
+
+        filtered_sample = TensorDict({key: sample[key] for key in vmapped_keys})
+        filtered_proposal = TensorDict(
+            {key: proposal_sample[key] for key in vmapped_keys}
+        )
+
+        # Set batch size to match energy dimension
         num_chains = energy.shape[0]
+        filtered_sample.batch_size = [num_chains]  # type: ignore
+        filtered_proposal.batch_size = [num_chains]  # type: ignore
+
+        # Your existing chunking logic
         new_sample: list = []
         new_energy = []
-        first_key = list(sample.keys())[0]
+
         for accept_, s_, s, e_, e in zip(
             accept,
-            proposal_sample.chunk(num_chains, dim=0),
-            sample.chunk(num_chains, dim=0),
+            filtered_proposal.chunk(num_chains, dim=0),
+            filtered_sample.chunk(num_chains, dim=0),
             proposal_energy,
             energy,
         ):
-            # Only update the first field, keep the rest as-is
-            s_dict = s.to_dict()
-            s__dict = s_.to_dict()
             if accept_.item():
-                s_dict[first_key] = s__dict[first_key]
-                new_sample.append(TensorDict(s_dict, batch_size=[1]))
+                new_sample.append(s_)
                 new_energy.append(e_)
             else:
                 new_sample.append(s)
                 new_energy.append(e)
-        sample = torch.cat(new_sample, dim=0)  # type: ignore
+
+        # Reconstruct full TensorDict with updated vmapped parameters
+        result_sample = sample.clone()
+        result_filtered = torch.cat(new_sample, dim=0)
+
+        # Update only the vmapped keys
+        for key in vmapped_keys:
+            result_sample.set(key, result_filtered[key])  # type: ignore
+
         energy = torch.stack(new_energy, dim=0)
-        return sample, energy
+        return result_sample, energy
 
 
 @dataclass
@@ -237,17 +273,14 @@ class MHSampler(Sampler):
     ) -> dict:
         std = self.std if self.schedule is None else self.schedule(step)
         metrics = {"std": std}
-        first_key = list(sample.keys())[0]
+
+        # Apply proposal function to the first vmapped parameter key
         proposal_fn = functools.partial(self.proposal_fn, std=std)
         proposal_sample = sample.clone()
-        if isinstance(sample[first_key], torch.Tensor):
-            proposal_sample[first_key] = proposal_fn(sample[first_key])
-        elif isinstance(sample[first_key], TensorDict):
-            proposal_sample[first_key] = sample[first_key].apply(proposal_fn)
-        else:
-            raise ValueError(f"Unsupported type: {type(sample[first_key])}")
-        proposal_energy = energy_fn(*proposal_sample.values())
-        energy = energy_fn(*sample.values())
+        proposal_sample["sample"] = proposal_fn(sample["sample"])
+
+        proposal_energy = energy_fn(*_flatten_args(proposal_sample))
+        energy = energy_fn(*_flatten_args(sample))
         return {
             "energy": energy,
             "proposal_sample": proposal_sample,
@@ -286,34 +319,35 @@ class SGLDSampler(Sampler):
             if self.dampening_schedule is None
             else self.dampening_schedule(step)
         )
-        # Find the first tensor field
-        first_key = list(sample.keys())[0]
-        first_value = sample[first_key]
-        sampled_td = TensorDict({"sampled_param": first_value})
-        args = list(sample.values())
-        args = [arg.to_dict() if isinstance(arg, TensorDict) else arg for arg in args]
 
         def energy_sum(*args):
             return torch.sum(energy_fn(*args))
+
+        # Find the first tensor field
+        args = [
+            arg.to_dict() if isinstance(arg, TensorDict) else arg
+            for arg in list(sample.values())
+        ]
 
         with torch.enable_grad():
             grad, energy_ = torch.func.grad_and_value(energy_sum, argnums=(0,))(*args)
             energy_.detach()
             grad_tensor = grad[0]
-            grad_td = TensorDict({"sampled_param": grad_tensor})
-        # TODO Ludi: theres something wrong with the forward and backward transition log-probabilities
-        proposal_sampled_td = sampled_td.apply(
-            lambda x, grad: x
-            - step_size * grad
-            + torch.randn_like(x) * (2 * step_size * dampening) ** 0.5,
-            grad_td,
+            grad_td = TensorDict({"sample": grad_tensor})
+        proposal_sample = (
+            sample.select("sample")
+            .clone()
+            .apply(
+                lambda x, grad: x
+                - step_size * grad
+                + torch.randn_like(x) * (2 * step_size * dampening) ** 0.5,
+                grad_td,
+            )
         )
-        proposal_sample = copy.deepcopy(sample)
-        proposal_sample[first_key] = proposal_sampled_td["sampled_param"]  # type: ignore
-        proposal_args = list(proposal_sample.values())
+        proposal_sample = copy.deepcopy(sample).update(proposal_sample)
         proposal_args = [
             arg.to_dict() if isinstance(arg, TensorDict) else arg
-            for arg in proposal_args
+            for arg in list(proposal_sample.values())
         ]
         with torch.no_grad():
             proposal_energy = energy_fn(*proposal_args)
