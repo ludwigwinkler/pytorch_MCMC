@@ -32,6 +32,10 @@ requires-python = ">=3.11"
 test = ["pytest"]
 dev = ["pre-commit"]
 
+[tool.pytest.ini_options]
+addopts = "-n 4"
+
+
 [tool.setuptools]
 # tell setuptools where to find packages
 package-dir = { "" = "src" }

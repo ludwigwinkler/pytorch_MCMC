@@ -563,27 +563,39 @@ class TestHMCSampler:
         )
         num_chains = 200
         n_steps = 1000
+        num_int_steps = 10
+        buffer = 100
         x_init = torch.randn(num_chains, 1)
         init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
         energy_fn = torch.vmap(lambda x: Energy.energy(x), in_dims=(0,))
-        Sampler = HMCSampler(step_size=0.1, num_steps=5)
+        Sampler = HMCSampler(step_size=0.1, num_steps=num_int_steps)
         samples, energy = Sampler(
-            sample=init_sample, energy_fn=energy_fn, steps=n_steps, verbose=False
+            sample=init_sample,
+            energy_fn=energy_fn,
+            steps=n_steps,
+            verbose=True,
+            buffer=buffer,
         )
-        assert samples["sample"].shape[0] == num_chains * n_steps
-        assert energy.shape[0] == num_chains * n_steps
+        assert samples["sample"].shape[0] == num_chains * buffer
+        assert energy.shape[0] == num_chains * buffer
 
     def test_HMC_gaussianmixture2d(self):
         Energy = GaussianMixture2D()
         num_chains = 100
         n_steps = 500
+        num_int_steps = 10
+        buffer = 100
         x_init = torch.randn(num_chains, 2)
         init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
         energy_fn = torch.vmap(lambda x: Energy.energy(x), in_dims=(0,))
-        Sampler = HMCSampler(step_size=0.05, num_steps=10)
+        Sampler = HMCSampler(step_size=0.05, num_steps=num_int_steps)
         samples, energy = Sampler(
-            sample=init_sample, energy_fn=energy_fn, steps=n_steps, verbose=False
+            sample=init_sample,
+            energy_fn=energy_fn,
+            steps=n_steps,
+            verbose=False,
+            buffer=buffer,
         )
-        assert samples["sample"].shape[0] == num_chains * n_steps
+        assert samples["sample"].shape[0] == num_chains * buffer
         assert samples["sample"].shape[1] == 2
-        assert energy.shape[0] == num_chains * n_steps
+        assert energy.shape[0] == num_chains * buffer

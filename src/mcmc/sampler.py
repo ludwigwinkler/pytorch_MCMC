@@ -560,8 +560,6 @@ class HMCSampler(Sampler):
         with torch.no_grad():
             current_H = hamiltonian(q_init, p_init).unsqueeze(-1)
             proposal_H = hamiltonian(q.detach(), p_prop.detach()).unsqueeze(-1)
-            # energy = energy_fn(*args)
-            # proposal_energy = energy_fn(*proposal_args)
 
         # No explicit transition log-probabilities for HMC
         return {
