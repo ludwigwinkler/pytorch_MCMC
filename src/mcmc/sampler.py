@@ -172,6 +172,8 @@ class Sampler:
             if verbose:
                 print_str = {"Accept": f"{accept_ema.val:.3f} {energy.mean():.3f}"}
                 for key, value in metrics.items():
+                    if isinstance(value, torch.Tensor):
+                        value = value.item()
                     print_str["Accept"] += f" {key}: {value:.3f} "
                 pbar.set_postfix(print_str)  # type: ignore
         samples, energies = zip(
@@ -462,4 +464,116 @@ class MALASampler(Sampler):
             "forward_transition_log_prob": forward_energy.detach(),
             "backward_transition_log_prob": backward_energy.detach(),
             "metrics": metrics,
+        }
+
+        # INSERT_YOUR_CODE
+
+
+@dataclass
+class HMCSampler(Sampler):
+    step_size: float = 0.01
+    num_steps: int = 10
+    mass: float = 1.0
+    step_size_schedule: Optional[Callable] = None
+    num_steps_schedule: Optional[Callable] = None
+    has_accept_step: bool = True
+
+    def proposal_step(
+        self, sample: TensorDict, energy_fn: Callable, step: int | None = None
+    ) -> dict:
+        # metrics = {}
+        step_size = (
+            self.step_size
+            if self.step_size_schedule is None
+            else self.step_size_schedule(step)
+        )
+        num_steps = (
+            self.num_steps
+            if self.num_steps_schedule is None
+            else self.num_steps_schedule(step)
+        )
+
+        # Assume 'sample' key contains the parameter tensor
+        q_init = sample["sample"]
+        # Draw momentum from N(0, mass)
+        p_init = torch.randn_like(q_init) * self.mass**0.5
+
+        def energy_sum(*args):
+            return torch.sum(energy_fn(*args))
+
+        # Leapfrog integration
+        q = q_init.clone().detach()
+        p = p_init.clone().detach()
+        q.requires_grad_(True)
+        p.requires_grad_(True)
+
+        # Half step for momentum
+        args = [
+            arg.to_dict() if isinstance(arg, TensorDict) else arg
+            for arg in list(sample.values())
+        ]
+        with torch.enable_grad():
+            grad_q, _ = torch.func.grad_and_value(energy_sum, argnums=(0,))(*args)
+            grad_q_tensor = grad_q[0]
+        p = p - 0.5 * step_size * grad_q_tensor
+
+        for _ in range(num_steps):
+            # Full step for position
+            q = q + step_size * p / self.mass
+            # Prepare new args for gradient
+            proposal_sample = copy.deepcopy(sample)
+            proposal_sample["sample"] = q
+            proposal_args = [
+                arg.to_dict() if isinstance(arg, TensorDict) else arg
+                for arg in list(proposal_sample.values())
+            ]
+            # Full step for momentum, except at end of trajectory
+            with torch.enable_grad():
+                grad_q, _ = torch.func.grad_and_value(energy_sum, argnums=(0,))(
+                    *proposal_args
+                )
+                grad_q_tensor = grad_q[0]
+            if _ != num_steps - 1:
+                p = p - step_size * grad_q_tensor
+        # Final half step for momentum
+        p = p - 0.5 * step_size * grad_q_tensor
+
+        # Negate momentum for symmetry
+        p_prop = -p
+
+        # Build proposal sample
+        proposal_sample = copy.deepcopy(sample)
+        proposal_sample["sample"] = q.detach()
+
+        # Compute energies
+        def hamiltonian(q, p):
+            sample_dict = copy.deepcopy(sample)
+            sample_dict["sample"] = q
+            args = [
+                arg.to_dict() if isinstance(arg, TensorDict) else arg
+                for arg in list(sample_dict.values())
+            ]
+            potential = energy_fn(*args)
+            kinetic = (p**2).sum(dim=-1, keepdim=True) / (2 * self.mass)
+            return potential + kinetic
+
+        with torch.no_grad():
+            current_H = hamiltonian(q_init, p_init).unsqueeze(-1)
+            proposal_H = hamiltonian(q.detach(), p_prop.detach()).unsqueeze(-1)
+            # energy = energy_fn(*args)
+            # proposal_energy = energy_fn(*proposal_args)
+
+        # No explicit transition log-probabilities for HMC
+        return {
+            "energy": current_H.detach(),
+            "proposal_sample": proposal_sample.detach(),
+            "proposal_energy": proposal_H.detach(),
+            "forward_transition_log_prob": None,
+            "backward_transition_log_prob": None,
+            # "metrics": {
+            #     **metrics,
+            #     "current_H": current_H.detach(),
+            #     "proposal_H": proposal_H.detach(),
+            #     "accept_prob": torch.exp(current_H - proposal_H).clamp(max=1.0),
+            # },
         }

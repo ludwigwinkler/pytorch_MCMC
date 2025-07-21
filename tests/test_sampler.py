@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from tensordict import TensorDict
 from matplotlib import pyplot as plt
-from mcmc.sampler import MHSampler, MALASampler, SGLDSampler
+from mcmc.sampler import MHSampler, MALASampler, SGLDSampler, HMCSampler
 from mcmc.energy import (
     Gaussian1D,
     GaussianMixture1D,
@@ -526,3 +526,64 @@ class TestSGLDSampler:
         assert (
             energies.mean().item() < 0.4
         ), f"Mean energy too high: {energies.mean().item()}"
+
+
+class TestHMCSampler:
+    """Test suite for Hamiltonian Monte Carlo sampler."""
+
+    @pytest.mark.parametrize(
+        "mean,std,step_size,num_steps",
+        [
+            (0.0, 1.0, 0.1, 5),
+            (1.0, 0.8, 0.05, 10),
+            (-1.0, 0.5, 0.1, 5),
+            (1.5, 1.5, 0.2, 5),
+        ],
+    )
+    def test_HMC_gaussian1d(self, mean, std, step_size, num_steps):
+        Energy = Gaussian1D(mean=mean, std=std)
+        num_chains = 200
+        n_steps = 500
+        x_init = torch.randn(num_chains, 1)
+        init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
+        energy_fn = torch.vmap(lambda x: Energy.energy(x), in_dims=(0,))
+        Sampler = HMCSampler(step_size=step_size, num_steps=num_steps)
+        samples, energy = Sampler(
+            sample=init_sample, energy_fn=energy_fn, steps=n_steps, verbose=False
+        )
+        sample_mean = samples["sample"].mean().item()
+        sample_std = samples["sample"].std().item()
+        assert abs(sample_mean - mean) < 0.15
+        assert abs(sample_std - std) < 0.15
+
+    def test_HMC_gaussianmixture1d(self):
+        Energy = GaussianMixture1D(
+            weights=torch.tensor([0.5, 0.25, 0.25]),
+            means=torch.tensor([-2.5, -0.5, 0.5]),
+        )
+        num_chains = 200
+        n_steps = 1000
+        x_init = torch.randn(num_chains, 1)
+        init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
+        energy_fn = torch.vmap(lambda x: Energy.energy(x), in_dims=(0,))
+        Sampler = HMCSampler(step_size=0.1, num_steps=5)
+        samples, energy = Sampler(
+            sample=init_sample, energy_fn=energy_fn, steps=n_steps, verbose=False
+        )
+        assert samples["sample"].shape[0] == num_chains * n_steps
+        assert energy.shape[0] == num_chains * n_steps
+
+    def test_HMC_gaussianmixture2d(self):
+        Energy = GaussianMixture2D()
+        num_chains = 100
+        n_steps = 500
+        x_init = torch.randn(num_chains, 2)
+        init_sample = TensorDict({"sample": x_init}, batch_size=[num_chains])
+        energy_fn = torch.vmap(lambda x: Energy.energy(x), in_dims=(0,))
+        Sampler = HMCSampler(step_size=0.05, num_steps=10)
+        samples, energy = Sampler(
+            sample=init_sample, energy_fn=energy_fn, steps=n_steps, verbose=False
+        )
+        assert samples["sample"].shape[0] == num_chains * n_steps
+        assert samples["sample"].shape[1] == 2
+        assert energy.shape[0] == num_chains * n_steps
