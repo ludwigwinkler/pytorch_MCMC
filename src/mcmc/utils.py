@@ -1,6 +1,9 @@
+import math
+import torch
+import numpy as np
+from scipy.integrate import quad
 from numbers import Number
 from dataclasses import dataclass
-import math
 
 
 class EMA:
@@ -9,7 +12,7 @@ class EMA:
         self.step = 0
         self.val_ = None
 
-    def __call__(self, val: Number):
+    def __call__(self, val: float) -> float:
         if self.val_ is None:
             self.val_ = val
             self.ema_correction = 1.0
@@ -62,12 +65,49 @@ class RepeatedCosineDecaySchedule:
         return min + (max - min) * cosine
 
 
+# TODO compute autocorrelation of samples with lag tau
+
+# TODO Gelman Rubin statistic for convergence diagnostics
+
+
 @dataclass
 class RepeatedCosineSchedule:
     steps: int
     cycles: int
+    min: float = 0.0001
+    max: float = 0.01
 
-    def __call__(self, step, min, max):
-        cycle_pos = (step / self.steps) * self.cycles * math.pi
-        cosine = 0.5 * (1 + math.cos(cycle_pos))
-        return min + (max - min) * cosine
+    def __call__(self, step):
+        if step < self.steps:
+            cycle_pos = (step / self.steps) * self.cycles * math.pi
+            cosine = 0.5 * (1 + math.cos(cycle_pos))
+            return self.min + (self.max - self.min) * cosine
+        else:
+            return self.min
+
+
+def compute_partition_function_1d(energy_fn, x_min, x_max):
+    integrand = lambda x: np.exp(-energy_fn(torch.tensor(x)).item())
+    Z, _ = quad(integrand, x_min, x_max)
+    return Z
+
+
+# def estimate_1D_partition_function(samples, energy_fn, bins=100):
+#     """Estimate the partition function Z from MCMC samples using importance sampling.
+#     Args:
+#         samples (TensorDict): Samples from the MCMC chain.
+#         energy_fn (Callable): Energy function to evaluate the samples.
+#         bins (int): Number of bins for histogramming the samples.
+#     Returns:
+#         Z (float): Estimated partition function.
+#     """
+#     # counts occurences of samples in bins
+#     bins = torch.histc(samples, bins=50, min=samples.min(), max=samples.max())
+#     # Define bin edges and centers
+#     bin_edges = torch.linspace(samples.min(), samples.max(), steps=101)
+#     bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+#     bin_probs = bins / bins.sum()
+#     Z_binned = (
+#         torch.exp(-energy_fn(bin_centers)) * (bin_edges[1:] - bin_edges[:-1])
+#     ).sum()
+#     return Z_binned

@@ -1,13 +1,15 @@
 # %%
-import torch
+import functools
 import copy
-from tensordict import TensorDict
 from tqdm import tqdm
+
+import torch
+from tensordict import TensorDict, NonTensorData
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from numbers import Number
 
-from mcmc.sampler import MetropolisHastingsAcceptance
+from mcmc.sampler import MALASampler, MetropolisHastingsAcceptance
 from mcmc.energy import Energy, GaussianMixture1D, GaussianMixture2D
 from mcmc.utils import EMA, RepeatedCosineSchedule
 from mcmc.data import generate_nonstationary_data, generate_multimodal_linear_regression
@@ -15,9 +17,7 @@ from mcmc.data import generate_nonstationary_data, generate_multimodal_linear_re
 from torch.nn import Sequential, Linear, ReLU, Tanh, BatchNorm1d
 
 import os
-import psutil
 
-process = psutil.Process(os.getpid())
 
 plt.style.use("default")
 plt.rcParams["axes.facecolor"] = "white"
@@ -34,7 +34,7 @@ plt.rcParams["legend.facecolor"] = "white"
 
 
 x, y = generate_nonstationary_data(
-    num_samples=250,
+    num_samples=1_000,
     plot=False,
     y_nonstationary_noise_std=0.3,
     y_constant_noise_std=0.01,
@@ -42,9 +42,18 @@ x, y = generate_nonstationary_data(
 
 
 class ProbModel(Energy):
-    def __init__(self, model):
+    def __init__(self):
         super().__init__()
-        self.model = model
+        self.model = torch.nn.Sequential(
+            BatchNorm1d(1),
+            Linear(1, 32),
+            Tanh(),
+            Linear(32, 64),
+            Tanh(),
+            Linear(64, 64),
+            ReLU(),
+            Linear(64, 2),
+        )
 
     def forward(self, x):
         out = self.model(x)
@@ -52,10 +61,22 @@ class ProbModel(Energy):
         # return self.model(x) + std * torch.randn_like(x)
         return mu, torch.nn.functional.softplus(log_std)
 
-    def energy(self, mu, std, y):
-        # Assuming a simple energy function for demonstration
-        NLL = -torch.distributions.Normal(mu, std).log_prob(y)
-        return NLL
+    # def energy(self, mu, std, y):
+    #     # Assuming a simple energy function for demonstration
+    #     NLL = -torch.distributions.Normal(mu, std).log_prob(y)
+    #     return NLL
+
+    @staticmethod
+    def energy(probmodel, params, buffers, data, target, other=None):
+        mu, std = torch.func.functional_call(probmodel, (params, buffers), (data,))
+        energy = -torch.distributions.Normal(mu, std).log_prob(target).mean(dim=-2)
+        return energy
+
+    @staticmethod
+    def predict(prob_model, params, buffers, data):
+        # params, buffers = sample["params"], sample["buffers"]
+        mu, std = torch.func.functional_call(prob_model, (params, buffers), (data,))
+        return mu, std
 
     def pretrain(self, x, y, num_steps=100, lr=1e-3):
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
@@ -63,7 +84,7 @@ class ProbModel(Energy):
         for step in range(num_steps):
             optimizer.zero_grad()
             mu, std = self.forward(x)
-            loss = self.energy(mu, std, y).mean(dim=-2)
+            loss = -torch.distributions.Normal(mu, std).log_prob(y).mean(dim=-2)
             mse = torch.nn.functional.mse_loss(mu, y)
             loss.backward()
             optimizer.step()
@@ -72,50 +93,62 @@ class ProbModel(Energy):
                 print(f"Step {step}, Loss: {loss.item()}, MSE: {mse.item()}")
 
 
-num_chains = 10
-nn = torch.nn.Sequential(
-    BatchNorm1d(1),
-    Linear(1, 32),
-    Tanh(),
-    Linear(32, 64),
-    Tanh(),
-    Linear(64, 64),
-    ReLU(),
-    Linear(64, 2),
-)
-
-probmodel = ProbModel(nn)
+probmodel = ProbModel()
 # probmodel.pretrain(x, y, num_steps=100, lr=1e-3)
 
-
+num_chains = 11
 models = [copy.deepcopy(probmodel) for _ in range(num_chains)]
 
 params, buffers = torch.func.stack_module_state(models)
-init_params, init_buffers = copy.deepcopy(params), copy.deepcopy(buffers)
-
-
-def single_predict(params, buffers, data):
-    return torch.func.functional_call(probmodel.eval(), (params, buffers), (data,))
-
-
-def single_energy(prob_model, params, buffers, data, target):
-    mu, std = torch.func.functional_call(prob_model, (params, buffers), (data,))
-    energy = probmodel.energy(mu, std, target).mean(dim=-2)
-    return energy
-
-
-vmap_energy = torch.vmap(
-    single_energy, (None, 0, 0, None, None), randomness="different"
+init_samples = TensorDict(
+    {"params": params, "buffers": buffers, "data": x, "target": y, "aux": "abc"},
 )
-init_energy = vmap_energy(probmodel.eval(), params, buffers, x, y)
+
+
+# %%
+energy1 = lambda params, buffers, data, target, aux: probmodel.energy(
+    probmodel.train(), params, buffers, data, target
+)
+vmap_energy = torch.vmap(energy1, (0, 0, None, None, None), randomness="different")
+init_args = list(init_samples.values())
+init_args = [arg.to_dict() if isinstance(arg, TensorDict) else arg for arg in init_args]
+init_energy = vmap_energy(
+    *init_args,
+)
+
+args = list(init_samples.values())
+args = [arg.to_dict() if isinstance(arg, TensorDict) else arg for arg in args]
+
+grad_params, init_energy = torch.func.grad_and_value(
+    lambda p, b, x, y, aux: torch.sum(vmap_energy(p, b, x, y, aux)),
+    argnums=(0,),
+)(
+    *args,
+)
+
+# 1: works
+# vmap_energy2 = torch.vmap(
+#     probmodel.energy, (None, 0, 0, None, None), randomness="different"
+# )
+
+# init_energy = vmap_energy2(
+#     probmodel.train(),
+#     init_samples["params"].to_dict(),
+#     init_samples["buffers"].to_dict(),
+#     x,
+#     y,
+# )
+
+print(init_energy)
+# 1
 
 # %%
 
 
-def plot_uncertainty(params, buffers, str=""):
+def plot_uncertainty(params, buffers, title=""):
     x_test = torch.linspace(-4, 4, 100).unsqueeze(-1)
-    mu, std = torch.vmap(single_predict, (0, 0, None), randomness="different")(
-        params, buffers, x_test
+    mu, std = torch.vmap(probmodel.predict, (None, 0, 0, None), randomness="different")(
+        probmodel.eval(), params, buffers, x_test
     )
     mu, std = mu.detach().numpy(), std.detach().numpy()
     plt.figure(figsize=(12, 6))
@@ -140,11 +173,21 @@ def plot_uncertainty(params, buffers, str=""):
     plt.xlabel("x")
     plt.ylabel("y")
     plt.ylim(-2, 2)
-    plt.title("Model Prediction " + str)
+    plt.title("Model Prediction " + title)
     plt.show()
 
 
-# plot_uncertainty(params, buffers)
+plot_uncertainty(params, buffers)
+
+# %%
+
+# print(init_samples)
+# num_steps = 2_000
+# MALA = MALASampler()
+# energy_fn = torch.vmap(probmodel.energy, (None, 0, None, None), randomness="different")
+# samples, energy = MALA(
+#     sample=init_samples, energy_fn=energy_fn, steps=num_steps, verbose=True
+# )
 
 
 # %%
@@ -152,6 +195,23 @@ def plot_uncertainty(params, buffers, str=""):
 
 proposal_std = 0.001
 
+chain = [
+    (
+        (
+            TensorDict(params, batch_size=num_chains),
+            TensorDict(buffers, batch_size=num_chains),
+        ),
+        init_energy,
+    )
+]
+
+init_energy = vmap_energy(
+    # probmodel.train(),
+    init_samples["params"].to_dict(),
+    init_samples["buffers"].to_dict(),
+    x,
+    y,
+)
 chain = [
     (
         (
@@ -177,9 +237,9 @@ for step in pbar:
     # Compute new parameters
     with torch.enable_grad():
         grad, energy_ = torch.func.grad_and_value(
-            lambda model, p, b, x, y: torch.sum(vmap_energy(model, p, b, x, y)),
-            argnums=(1,),
-        )(probmodel.train(), params.to_dict(), buffers.to_dict(), x, y)
+            lambda p, b, x, y: torch.sum(vmap_energy(p, b, x, y)),
+            argnums=(0,),
+        )(params.to_dict(), buffers.to_dict(), x, y)
         energy_.detach()
         grad = TensorDict(grad[0], batch_size=num_chains).detach()
     proposal_params = copy.deepcopy(params).apply(
@@ -191,7 +251,7 @@ for step in pbar:
     # Evaluate proposal energies
     with torch.no_grad():
         proposal_energy = vmap_energy(
-            probmodel.eval(), params.to_dict(), buffers.to_dict(), x, y
+            params.to_dict(), buffers.to_dict(), x, y
         ).detach()
     accept: torch.Tensor = MetropolisHastingsAcceptance(
         energy, proposal_energy
@@ -200,14 +260,14 @@ for step in pbar:
     # Update parameters based on acceptance
     proposal_params.auto_batch_size_(1)
     params.auto_batch_size_(1)
-    next_params: list[TensorDict] = []
+    next_params = []
     for accept_, p_, p in zip(
         accept,
         proposal_params.chunk(num_chains, dim=0),
         params.chunk(num_chains, dim=0),
     ):
         next_params.append(p_) if accept_.item() else next_params.append(p)
-    new_params: TensorDict = torch.cat(next_params, dim=0)  # type: ignore
+    new_params = torch.cat(next_params, dim=0)
 
     # new_params = torch.concat([p_ for accept, p_, p in zip(accept, new_params.chunk(num_chains, dim=0), params.chunk(num_chains, dim=0)) if accept.item() else p], dim=0)
 
@@ -226,7 +286,7 @@ for step in pbar:
     )
 
     if step % (num_steps // 5) == 0 or step == num_steps - 1:
-        plot_uncertainty(new_params.to_dict(), buffers.to_dict(), str=f"Step {step}")
+        plot_uncertainty(new_params.to_dict(), buffers.to_dict(), title=f"Step {step}")  # type: ignore
         # plt.savefig(f"MH_NeuralNetwork_step_{step}.png", dpi=300)
         plt.close()
         # plot_uncertainty(new_params.to_dict(), buffers.to_dict(), str=f"Step {step}")

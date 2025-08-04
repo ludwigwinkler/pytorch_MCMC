@@ -6,6 +6,8 @@ __pycache__/
 # user files
 *.chain
 *.ipynb
+.cursor/rules/mcmc.mdc
+
 
 # C extensions
 *.so
@@ -126,3 +128,24 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# GitHub Actions
+.github/workflows/*.log
+
+# Coverage reports
+coverage.xml
+htmlcov/
+.coverage*
+
+# VS Code
+.vscode
+.vscode/
+.vscode/settings.json
+
+# macOS
+.DS_Store
+
+# PyTorch model files
+*.pth
+*.pt
+.vscode/settings.json

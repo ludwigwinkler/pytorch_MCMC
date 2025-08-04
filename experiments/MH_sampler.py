@@ -9,9 +9,9 @@ from numbers import Number
 # import mcmc.sampler.MetropolisHastingAcceptance
 # from mcmc.sampler import MetropolisHastingAcceptance
 
-from mcmc.sampler import MetropolisHastingsAcceptance
-from mcmc.energy import GaussianMixture1D, GaussianMixture2D
-from mcmc.utils import EMA
+from mcmc.sampler import MHSampler, MALASampler, SGLDSampler
+from mcmc.energy import Gaussian1D, GaussianMixture1D, GaussianMixture2D
+from mcmc.utils import EMA, RepeatedCosineSchedule
 
 plt.style.use("default")
 plt.rcParams["axes.facecolor"] = "white"
@@ -27,59 +27,72 @@ plt.rcParams["legend.edgecolor"] = "black"
 plt.rcParams["legend.facecolor"] = "white"
 
 
-gmm2d = GaussianMixture2D()
-samples2d = gmm2d.sample(50_000)
+# gmm2d = GaussianMixture2D()
+# samples2d = gmm2d.sample(50_000)
 
-# 2D contour plot of samples2d
-x = samples2d[:, 0].numpy()
-y = samples2d[:, 1].numpy()
-plt.figure(figsize=(6, 5))
-plt.hist2d(x, y, bins=100, density=True, cmap="viridis")
-plt.colorbar(label="Density")
-plt.xlabel("x")
-plt.ylabel("y")
-plt.title("2D Gaussian Mixture Samples")
-plt.show()
+# # 2D contour plot of samples2d
+# x = samples2d[:, 0].numpy()
+# y = samples2d[:, 1].numpy()
+# plt.figure(figsize=(6, 5))
+# plt.hist2d(x, y, bins=100, density=True, cmap="viridis")
+# plt.colorbar(label="Density")
+# plt.xlabel("x")
+# plt.ylabel("y")
+# plt.title("2D Gaussian Mixture Samples")
+# plt.show()
 
 # %%
-num_chains = 5000
-proposal_std = 0.5
-gmm = GaussianMixture1D(
-    means=[-3.0, 0.0, 3.0],
-    stds=[0.5, 0.5, 0.5],
-    weights=[2, 0.3, 0.1],
+Energy = GaussianMixture1D(
+    # weights=torch.tensor([0.5, 0.25, 0.25]),
+    # means=torch.tensor([-2.5, -0.5, 0.5]),
+    # stds=torch.tensor([0.5, 0.25, 0.5]),
 )
-vmap_energy = torch.vmap(gmm.energy, (0,))
-init_sample = TensorDict({"x": 3 * torch.randn((num_chains, 1)).clamp(-5, 5)})
-init_energy = vmap_energy(init_sample["x"])
-chain = [(init_sample, init_energy)]
+# Energy = Gaussian1D(mean=-1.5, std=1.5)
 
+data = Energy.sample(50_000)
 
-num_steps = 5_000
-accept_ema = EMA(ema_weight=0.99)
-pbar = tqdm(range(num_steps))
-MH = MetropolisHastingsAcceptance()
-for step in pbar:
-    state, energy = chain[-1]
-    proposal_state = state.clone().apply(
-        lambda x: x + torch.randn_like(x) * proposal_std
-    )
-    proposal_energy = vmap_energy(proposal_state["x"])
-    accept: torch.Tensor = MH(energy, proposal_energy)
-    new_state = state.apply(
-        lambda state_, proposal_state_: torch.where(accept, proposal_state_, state_),
-        proposal_state,
-    )
-    chain += [(new_state, proposal_energy)]
-    accept_ratio = accept.sum() / accept.numel()
-    accept_ema(accept_ratio.item())
-    pbar.set_postfix({"Accept": float(accept_ema.val), "PropStd": proposal_std})
+# Create initial sample: batch of 100 chains, each with 1D x
+num_chains = 500
+num_steps = 3000
+x_init = torch.randn(num_chains, 1) * 1
+init_sample = TensorDict({"x": x_init}, batch_size=[num_chains])
 
-data = chain[-1][0]["x"]
-data = data[-5 <= data]
-data = data[data <= 5]
-plt.hist(chain[0][0]["x"], density=True, bins=50, color="green", alpha=0.5)
-plt.hist(data, density=True, bins=50, color="b", alpha=0.5)
+# Vectorize the energy function using torch.func.vmap
+energy_fn = torch.vmap(lambda td: Energy.energy(td["x"]), in_dims=(0,))
 
-plt.plot(torch.linspace(-5, 5, 100), gmm.prob(torch.linspace(-5, 5, 100)))
-# plt.plot(torch.linspace(-5, 5, 100), -gmm.energy(torch.linspace(-5, 5, 100)))
+# Run the sampler for a small number of steps
+schedule = RepeatedCosineSchedule(steps=num_steps, cycles=1, min=0.01, max=1.0)
+Sampler = MALASampler(step_size=1.0, dampening=1.0, step_size_schedule=schedule)
+# Sampler = SGLDSampler(step_size=0.01, dampening=1.0)
+# Sampler = MHSampler(std=2.0)
+samples, energy = Sampler(
+    sample=init_sample, energy_fn=energy_fn, steps=num_steps, verbose=True
+)
+
+print(samples)
+
+# test
+
+# samples = [s for s, e in chain]
+# samples = torch.cat(samples, dim=0)
+
+plt.hist(
+    init_sample["x"].numpy(),
+    density=True,
+    bins=50,
+    color="green",
+    alpha=0.5,
+    label="Initial Samples",
+)
+plt.hist(
+    samples["x"].numpy(),
+    density=True,
+    bins=100,
+    color="blue",
+    alpha=0.5,
+    label="Final Samples",
+)
+plt.legend()
+
+plt.plot(torch.linspace(-5, 5, 100), Energy.prob(torch.linspace(-5, 5, 100)))
+plt.ylim(0, 1)

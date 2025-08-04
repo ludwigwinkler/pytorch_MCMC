@@ -2,9 +2,6 @@
 [tool.black]
 line-length = 80
 
-[tool.ty.environment]
-python = "/Users/ludwigwinkler/mamba/envs/mcmc/bin/python"
-
 [build-system]
 requires = ["setuptools>=61.0", "wheel", "setuptools_scm"]
 build-backend = "setuptools.build_meta"
@@ -13,6 +10,7 @@ build-backend = "setuptools.build_meta"
 name = "mcmc"
 dynamic = ["version"]
 dependencies = [
+	"scipy",
 	"torch",
 	"matplotlib",
 	"einops",
@@ -21,17 +19,33 @@ dependencies = [
 	"pytest",
 	"pytest-xdist",
 	"hydra-core",
+	"tensordict",
+	"ruff",
+	"pre-commit>=2.21.0",
+	"seaborn",
+	"tqdm",
 ]
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.11"
 
 [project.optional-dependencies]
 test = ["pytest"]
 dev = ["pre-commit"]
 
+[tool.pytest.ini_options]
+addopts = "-n 4"
+
+
 [tool.setuptools]
 # tell setuptools where to find packages
-package-dir = { "" = "src/mcmc" }
+package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
-where = ["src/mcmc"]
+where = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F"]
+ignore = ["F401", "E402", "E501", "E731"]
+
+[tool.ty.environment]
+python = "./.venv"

@@ -1,11 +1,79 @@
+from abc import abstractmethod
 import torch
 import einops
 
 __all__ = ["GaussianMixture1D", "GaussianMixture2D"]
 
 
-class GaussianMixture1D:
-    def __init__(self, means, stds, weights):
+class Energy(torch.nn.Module):
+    @abstractmethod
+    def energy(self, **kwargs):
+        """
+        Compute the energy of the model at point x.
+        """
+        raise NotImplementedError("Subclasses should implement this method.")
+
+
+class Gaussian1D(Energy):
+    def __init__(self, mean=0.0, std=1.0):
+        super().__init__()
+        self.mean = torch.tensor(mean, dtype=torch.float32)
+        self.std = torch.tensor(std, dtype=torch.float32)
+
+    def sample(self, num_samples=1):
+        return torch.normal(self.mean, self.std, size=(num_samples,))
+
+    def prob(self, x):
+        return (
+            1
+            / (self.std * torch.sqrt(2 * torch.tensor(torch.pi)))
+            * torch.exp(-0.5 * ((x - self.mean) / self.std) ** 2)
+        )
+
+    @property
+    def Z(self):
+        # Normalization constant for the Gaussian distribution
+        return self.std * torch.sqrt(2 * torch.tensor(torch.pi))
+
+    def energy(self, x):
+        # Negative log probability (up to constant)
+        return 0.5 * ((x - self.mean) / self.std) ** 2
+
+
+class Gaussian1DwithTemperature(Energy):
+    def __init__(self, mean=0.0, std=1.0):
+        super().__init__()
+        self.mean = torch.tensor(mean, dtype=torch.float32)
+        self.std = torch.tensor(std, dtype=torch.float32)
+
+    def sample(self, num_samples=1):
+        return torch.normal(self.mean, self.std, size=(num_samples,))
+
+    def prob(self, x):
+        return (
+            1
+            / (self.std * torch.sqrt(2 * torch.tensor(torch.pi)))
+            * torch.exp(-0.5 * ((x - self.mean) / self.std) ** 2)
+        )
+
+    @property
+    def Z(self):
+        # Normalization constant for the Gaussian distribution
+        return self.std * torch.sqrt(2 * torch.tensor(torch.pi))
+
+    def energy(self, x, T, other=None):
+        # Negative log probability (up to constant)
+        return 0.5 * ((x - self.mean) / self.std) ** 2 / T
+
+
+class GaussianMixture1D(Energy):
+    def __init__(
+        self,
+        means=[-2.0, -0.5, 1.5],
+        stds=[0.25, 1.0, 0.25],
+        weights=[0.2, 0.1, 0.1],
+    ):
+        super().__init__()
         self.means = torch.tensor(means, dtype=torch.float32)
         self.stds = torch.tensor(stds, dtype=torch.float32)
         self.weights = torch.tensor(weights, dtype=torch.float32)
@@ -37,11 +105,12 @@ class GaussianMixture1D:
 
     def energy(self, x):
         # Negative log probability (up to constant)
-        return self.log_prob(x) + 1
-
-    def neg_energy(self, x):
-        # Negative log probability (up to constant)
-        return -self.log_prob(x) + 1
+        # x = x.unsqueeze(-1)
+        # log_probs = (
+        #     0.5 * (x - self.means) ** 2 / (self.stds**2)
+        #     + torch.log(self.weights)
+        # )
+        return -self.log_prob(x)
 
 
 means_2d = torch.tensor([[-2, -2], [-2, 2], [2, 2], [2, -2]], dtype=torch.float32)
@@ -52,11 +121,12 @@ covs_2d = einops.repeat(
 weights_2d = torch.tensor([0.5, 0.5, 0.25, 0.75])
 
 
-class GaussianMixture2D:
+class GaussianMixture2D(Energy):
     def __init__(self, means=means_2d, covs=covs_2d, weights=weights_2d):
-        assert type(means) == type(covs) == type(weights) == torch.Tensor, (
-            f"{type(means)=} {type(covs)=} {type(weights)=}"
-        )
+        super().__init__()
+        assert (
+            type(means) is type(covs) is type(weights) is torch.Tensor
+        ), f"{type(means)=} {type(covs)=} {type(weights)=}"
         self.means = means  # shape: (K, 2)
         self.covs = covs  # shape: (K, 2, 2)
         self.weights = weights
@@ -96,7 +166,65 @@ class GaussianMixture2D:
         return self.combined_dist.log_prob(x).unsqueeze(-1)
 
     def energy(self, x):
-        return self.log_prob(x) + 1
+        return -self.log_prob(x)
 
-    # def neg_energy(self, x):
-    #     return -self.log_prob(x) + 1
+
+class LinearRegressionEnergy(Energy):
+    def __init__(self, m=1.0, b=-1, sigma=1.0):
+        super().__init__()
+        self.m = torch.tensor(m, dtype=torch.float32)
+        self.b = torch.tensor(b, dtype=torch.float32)
+        self.sigma = torch.tensor(sigma, dtype=torch.float32)
+
+    def sample(self, num_samples=100, x_range=(-5, 5)):
+        x = torch.empty(num_samples, 1).uniform_(*x_range)
+        noise = torch.randn(num_samples, 1) * self.sigma
+        y = self.m * x + self.b + noise
+        return x, y
+
+    def energy(self, x, y):
+        # Negative log-likelihood for Gaussian noise
+        pred = self.m * x + self.b
+        return 0.5 * ((y - pred) / self.sigma) ** 2
+
+    def log_prob(self, x, y):
+        pred = self.m * x + self.b
+        return -0.5 * ((y - pred) / self.sigma) ** 2 - torch.log(
+            self.sigma * torch.sqrt(2 * torch.tensor(torch.pi))
+        )
+
+
+class NeuralNetworkEnergy(Energy):
+    """
+    Probabilistic neural network for regression with Gaussian likelihood.
+    Returns mean and std for each input, and computes negative log-likelihood energy.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.model = torch.nn.Sequential(
+            torch.nn.BatchNorm1d(1),
+            torch.nn.Linear(1, 32),
+            torch.nn.Tanh(),
+            torch.nn.Linear(32, 64),
+            torch.nn.Tanh(),
+            torch.nn.Linear(64, 64),
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, 2),
+        )
+
+    def forward(self, x):
+        out = self.model(x)
+        mu, log_std = out.chunk(2, dim=-1)
+        return mu, torch.nn.functional.softplus(log_std)
+
+    @staticmethod
+    def energy(probmodel, params, buffers, data, target, other=None):
+        mu, std = torch.func.functional_call(probmodel, (params, buffers), (data,))
+        energy = -torch.distributions.Normal(mu, std).log_prob(target).mean(dim=-2)
+        return energy
+
+    @staticmethod
+    def predict(prob_model, params, buffers, data):
+        mu, std = torch.func.functional_call(prob_model, (params, buffers), (data,))
+        return mu, std
