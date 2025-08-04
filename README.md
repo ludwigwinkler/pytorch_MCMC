@@ -1,26 +1,3 @@
-# TODO:
-
-- functionalize forward calls such that multiple models can be evaluated on the same or multiple data -> multiple chains in parallel on same GPU
-- make acceptance sampler keep same model twice on GPU/Memory, naturally
-- use pytorch lightning with automatic_optimization=False? would be good for multi-gpu support
-- switch statements for tuning of metropolis hasting sampler
-
-```python
-energy(params, buffers, other)
-
-sample = TensorDict({
-    "params/sample": params,
-    "buffers": buffers,
-    "other": NonTensorDict({'key': value})
-})
-
-if 'buffers' in sample:
-    buffers = sample.pop("buffers)
-assert len(tensordict) == 2
-tensordict, nontensordict = sample.split()
-new_sample = proposal_step(tensordict)
-```
-
 # torch-MC^2 (torch-MCMC)
 HMC on 3 layer NN | HMC on GMM
 :-------------------------------------------:|:------------------------------:
@@ -33,111 +10,65 @@ This package implements a series of MCMC sampling algorithms in PyTorch in a mod
 - Metropolis Hastings
 - Stochastic Gradient Langevin Dynamics
 - (Stochastic) Hamiltonian Monte Carlo
-- Stochastic Gradient Nose-Hoover Thermostat
-- SG Riemann Hamiltonian Monte Carlo (coming ...)
+- Annealed Importance Sampling
 
-The focus lies on four core ingredients to MCMC with corresponding routines:
+# Design Philosophy
 
-- `MCMC.src.MCMC_ProbModel` : Probabilistic wrapper around your model providing a uniform interface
-- `MCMC.src.MCMC_Chain` : Markov Chain for storing samples√
-- `MCMC.src.MCMC_Optim` : MCMC_Optim parent class for handling parameters
-- `MCMC.src.MCMC_Sampler`: Sampler that binds it all together
+Jax useful influence is indisputable, particularly its use of `vmap` and `pmap` to vectorize computations.
+The first iteration of this package implemented the samplers via the `torch.optim` approach, which was not very flexible nor parallelizable.
 
+Recently, `torch` has published the functional API which allows you to mimic the functional programming style of Jax.
 
-These classes and functions are constructed along the structure of the core PyTorch framework.
-Especially the gradient samplers are designed around PyTorch's `optim` class to handle all things related to parameters.
+The design philosphy centers around using TensorDicts to work with arbitrarily shaped inputs and `torch.func` to implement the samplers in a functional way.
+The energy functions need to adhere to a specific signature, which allows for easy integration with the samplers: they need to take in a TensorDict with three keys, `sample`, `buffers`, and `other`, and return a scalar energy value.
+`sample` is what you want to sample, `buffers` are as parallel as `sample` but aren't sampled over (think of BatchNorm, although what exactly is BatchNorm in samplers?, you can also feed in the temperature in Boltzman distribution here), and `*other` is a non-TensorDict that can contain any additional information needed for the energy computation.
 
-# ProbModel
+```python
+energy(params, buffers, other)
 
-The wrapper `MCMC.src.MCMC_ProbModel` defines are small set of functions which are required in order to allow the `Sampler_Chain` to interact with it and evaluate the relevant quantities.
-
-Any parameter in the model that we wish to sample from has to be designated a `torch.nn.Parameter()`.
-This could be as simple as a single particle that we move around a 2-D distribution or a full neural network.
-
-It has four methods which have to be defined by the user:
-
-`MCMC_ProbModel.log_prob()`:
-
-Evaluates the log_probability of the likelihood of the model.
-
-It returns a dictionary which the first entry being the log-probability, i.e. `{"log_prob": -20.03}`.
-
-Moreover, additional evaluation metrics can be added to the dictionary as well, i.e. `{"log_prob": -20.03, "Accuracy": 0.58}`.
-The sampler will inspect the dictionary returned by the evaluation of the model and will create corresponding running averages of the used metrics.
-
-`MCMC_ProbModel.reset_parameters()`:
-
-Any value that we want to sample has to be declared as a `torch.nn.Parameter()` such that the `MCMC_Optims` can track the values in the background.
-`reset_parameters()` is mainly used to reinitialize the model.
-
-`MCMC_ProbModel.pretrain()`:
-
-In cases where we want a good initial guess to start our markov chain, we can implement a pretrain method which will optimize the parameters in some user defined manner.
-If `pretrain=True` is passed during initialization of the sampler, it will assume that the `MCMC_ProbModel.pretrain()` is implemented.
-
-In order to allow more sophisticated dynamic samplers such as `HMC_Sampler` to properly sample mini-batches, the probmodel should be initialized with a dataloader that takes care of sampling minibatches.
-That way, dynamic samplers can simple access `probmodel.dataloader`.
-
-# Chain
-
-This is just a convenience container that stores the sampled values and can be queried for specific values to determine the progress of the sampling chain.
-The samples of the parameters of the model are stored as a list `chain.samples` where each entry is PyTorch's very own `state_dict()`.
-
-After the sampler is finished the samples of the model can be accessed through the property `chain.samples` which returns a list of `state_dict()`'s that can be loaded into the model.
-
-An example:
-
+sample = TensorDict({
+    "sample": params,
+    "buffers": buffers,
+    "*other": NonTensorDict({'key': value})
+})
 ```
 
-for sample_state_dict in chain.samples:
+With the functional approach, you can easily stack multiple MCMC chains in the first dimension and wrap the energy function in a `vmap` to vectorize the computations.
 
-    self.load_state_dict(sample_state_dict)
+```python
+probmodel = ProbModel()
+# probmodel.pretrain(x, y, num_steps=100, lr=1e-3) # Optional pretrain
 
-    ... do something like ensemble prediction ...
+# Create 11 parallel chains each with a full set of neural network parameters
+num_chains = 11
+models = [copy.deepcopy(probmodel) for _ in range(num_chains)]
+
+# Extract the 11 parameters and buffers from the models
+params, buffers = torch.func.stack_module_state(models)
+init_samples = TensorDict(
+    {"sample": params, # shape:[MCMC Chains, Parameters...]
+    "buffers": buffers, # shape:[MCMC Chains, Buffers...]
+    "data": x,
+    "target": y,
+    "aux": "abc"},
+)
+
+energy1 = lambda params, buffers, data, target, aux: probmodel.energy(
+    probmodel.train(), params, buffers, data, target
+)
+# Vectorize the energy function to compute the energy for all chains in parallel
+# 'sample' and 'buffers' are the first two parallelized arguments, and 'data', 'target', and 'aux' are additional arguments
+vmap_energy = torch.vmap(energy1, (0, 0, None, None, None), randomness="different")
+# TensorDict to torch.func compatible dict
+init_args = [
+    arg.to_dict() if isinstance(arg, TensorDict) else arg
+    for arg in list(init_samples.values())
+]
+init_energy = vmap_energy(
+    *init_args,
+)
+print(init_energy)
 ```
-
-`MCMC_Chain` is implemented as a mutable sequence and allows the concatination of tuples `(probmodel/torch.state_dict, log_probs: dict/odict, accept: bool)` and the concatenation of entire chains.
-
-# MCMC_Optim
-
-The `MCMC_Optim`'s inherit from PyTorch's very own `Optimizers` and make working with gradients just so significantely more pleasant.
-
-By calling `MCMC_Optim.step()` they propose a new a set of parameters for `ProbModel`, the `log_prob()` of which is evaluated by `MCMC_Sampler`.
-
-# MCMC_Sampler
-
-The core component that ties everything together.
-
-1. `MCMC_Optim` does a `step()` and proposes new parameters for the `ProbModel`.
-2. `MCMC_Sampler` evaluates the `log_prob()` of the `ProbModel` and determines the acceptance of the proposal.
-3. If accepted, the `ProbModel` is passed to the `MCMC_Chain` to be saved
-4. If not accepted, we play the game again with a new proposal.
-
-# What's the data structure underneath?
-
-Each sampler uses the following datastructure:
-
-```
-Sampler:
-    - Sampler_Chain #1
-        - ProbModel #1
-        - Optim #1
-        - Chain #1
-    - Sampler_Chain #2
-        - ProbModel #2
-        - Optim #2
-        - Chain #2
-    - Sampler_Chain #3
-        .
-        .
-        .
-    .
-    .
-    .
-
-```
-
-By packaging the optimizers and probmodels directly into the chain, these chains can be run completely independently, possibly even on multi-GPU systems.
 
 # Final Note
 
