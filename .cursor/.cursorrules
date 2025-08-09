@@ -1,0 +1,52 @@
+Cursor Rules for this repo
+
+- Backend layout
+  - PyTorch lives under `src/mcmc/torch/`.
+  - JAX must live under `src/mcmc/jax/` (when added). Do not cross-import between backends.
+  - Top-level `src/mcmc/` files (`__init__.py`, `sampler.py`, `energy.py`, `utils.py`, `data.py`) are shims re-exporting the PyTorch backend. Do not break these.
+
+- API contracts
+  - Energy modules expose `energy(...)` and return per-chain energies shaped `[batch, 1]` (or broadcastable to it).
+  - For NN energies, use `torch.func.functional_call(model, (params, buffers), (data,))`; no in-place mutation of model state.
+  - Extra inputs (e.g., `data`, `target`, `T`, `other`) are allowed; keep vmapped args first: `sample` (and optionally `buffers`).
+  - Samplers implement `__call__(sample: TensorDict, energy_fn: Callable, burn_in: int, steps: int, buffer: Optional[int], verbose: bool)` and return `(samples: TensorDict, energies: Tensor)`.
+  - Only vmapped keys are `sample` and optionally `buffers`. Preserve all other keys when stacking/concatenating results.
+
+- Imports and boundaries
+  - Inside `src/mcmc/torch/`, use relative imports (e.g., `from .utils import EMA`).
+  - Top-level re-exports must import from `.torch.*` only; never import JAX at the top-level.
+  - When adding JAX, mirror the public API under `mcmc.jax` and add JAX-only tests under `tests/jax/`.
+
+- Coding style
+  - Python 3.11+. Black line length 80; ruff enabled (E,F; ignores: F401, E402, E501, E731).
+  - Use descriptive names; avoid 1–2 char names. Prefer guard clauses; avoid deep nesting.
+  - Document public APIs with concise docstrings. Match existing formatting; do not reformat unrelated code.
+
+- TensorDict and vectorization
+  - Maintain key order and preserve non-vmapped keys.
+  - Ensure `energy_fn` passed to samplers is vmapped (`torch.vmap`) and check via `hasattr(energy_fn, "__wrapped__")`.
+  - For gradient-based samplers, use `torch.func.grad_and_value` and keep gradient sections inside `with torch.enable_grad():`.
+
+- Numerical stability and performance
+  - Use log-sum-exp where applicable.
+  - Do not construct tensors from tensors with `torch.tensor(t)`; prefer `t.detach().clone()`.
+  - Keep shapes/broadcasting explicit; sanity-check acceptance ratios.
+
+- Testing & environment
+  - Use `.venv`: run via `.venv/bin/python` and `.venv/bin/pytest`.
+  - Run tests with `pytest -n 4`. For PyTorch-only changes, run `tests/torch/`.
+  - Keep tests deterministic (seeded in `tests/torch/conftest.py`). Avoid global state.
+
+- Backward compatibility
+  - Preserve imports like `from mcmc.sampler import MHSampler`.
+  - Maintain `__all__` exports in `mcmc/__init__.py` to default to the PyTorch backend.
+
+- JAX integration (when added)
+  - Mirror PyTorch APIs/signatures under `src/mcmc/jax/`.
+  - Provide `mcmc.jax.__init__` re-exports. Do not alter default top-level exports.
+  - Add parity tests in `tests/jax/` where feasible.
+
+- PR checklist
+  - Tests pass (`pytest -n 4`). No new lint errors; pre-commit passes.
+  - Public APIs documented; re-exports intact; no cross-backend imports.
+  - Shapes/keys preserved; deterministic behavior maintained.

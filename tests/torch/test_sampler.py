@@ -3,8 +3,8 @@ import torch
 import numpy as np
 from tensordict import TensorDict
 from matplotlib import pyplot as plt
-from mcmc.sampler import MHSampler, MALASampler, SGLDSampler, HMCSampler
-from mcmc.energy import (
+from mcmc.torch.sampler import MHSampler, MALASampler, SGLDSampler, HMCSampler
+from mcmc.torch.energy import (
     Gaussian1D,
     GaussianMixture1D,
     GaussianMixture2D,
@@ -12,7 +12,7 @@ from mcmc.energy import (
 )
 
 import copy
-from mcmc.data import generate_nonstationary_data
+from mcmc.torch.data import generate_nonstationary_data
 
 
 @pytest.fixture(autouse=True)

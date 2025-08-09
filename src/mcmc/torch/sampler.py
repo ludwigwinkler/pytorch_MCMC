@@ -6,7 +6,7 @@ import functools
 from tqdm import tqdm
 from dataclasses import dataclass
 from tensordict import TensorDict
-from mcmc.utils import EMA
+from mcmc.torch.utils import EMA
 
 from torch import Tensor
 

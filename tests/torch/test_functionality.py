@@ -1,8 +1,8 @@
 import pytest
 import torch
 from tensordict import TensorDict
-from mcmc.sampler import MHSampler, MALASampler, SGLDSampler
-from mcmc.energy import Gaussian1D, GaussianMixture1D, Gaussian1DwithTemperature
+from mcmc.torch.sampler import MHSampler, MALASampler, SGLDSampler
+from mcmc.torch.energy import Gaussian1D, GaussianMixture1D, Gaussian1DwithTemperature
 
 
 @pytest.mark.parametrize(
